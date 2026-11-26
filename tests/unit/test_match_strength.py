@@ -135,9 +135,9 @@ def test_the_close_match_bar_must_be_in_zero_to_one(bad: float) -> None:
 
 async def test_the_mcp_reply_carries_the_loose_note_but_not_beside_a_degraded_one() -> None:
     from hivemind.mcp.app import CLOSEST_LOOSE, DEGRADED_NOTE, LOOSE_NOTE, _search_reply
-    from tests.unit.test_mcp_server import make_app
+    from tests.builders import make_mcp_app
 
-    app = make_app()
+    app = make_mcp_app()
     loose = await _loose_result()
     reply = _search_reply(app, loose)
     assert (reply["closest"], reply["note"]) == (CLOSEST_LOOSE, LOOSE_NOTE)

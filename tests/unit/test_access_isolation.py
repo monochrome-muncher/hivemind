@@ -25,11 +25,7 @@ from hivemind.mcp.app import (
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
@@ -59,15 +55,8 @@ class Pool:
         self.config = make_search_config()
 
     def as_(self, credential: Credential) -> McpHivemind:
-        return McpHivemind(
-            read_service=ReadService(self.store, GovernanceService(self.store), self.config),
-            store=self.store,
-            write_service=WriteService(self.store, self.embedder),
-            search_service=SearchService(self.store, self.embedder, self.config, now_fn=self.clock),
-            governance_service=GovernanceService(self.store),
-            access_service=AccessService(self.store),
-            search_config=self.config,
-            credential=credential,
+        return mcp_app(
+            self.store, credential, self.clock, embedder=self.embedder, config=self.config
         )
 
 

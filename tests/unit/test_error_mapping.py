@@ -28,9 +28,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
@@ -66,16 +64,10 @@ class World:
     target_fleet: str = ""
 
     def mcp(self, key: str) -> McpHivemind:
-        embedder, config = make_embedder(), make_search_config()
-        return McpHivemind(
-            store=self.store,
-            write_service=WriteService(self.store, embedder),
-            search_service=SearchService(self.store, embedder, config),
-            governance_service=GovernanceService(self.store, config),
-            read_service=ReadService(self.store, GovernanceService(self.store, config), config),
-            access_service=AccessService(self.store, self.authenticator),
-            search_config=config,
-            credential=self.authenticator._by_key[key],
+        return mcp_app(
+            self.store,
+            self.authenticator._by_key[key],
+            access=AccessService(self.store, self.authenticator),
         )
 
 

@@ -11,7 +11,7 @@ import pytest
 
 from hivemind.domain.access import AgentStatus
 from hivemind.domain.audit import AuditAction, AuditFilters
-from tests.unit.test_successions import ADMIN, ADMIN_H, World
+from tests.builders import ADMIN, ADMIN_H, World
 
 ALIAS = "jane"
 

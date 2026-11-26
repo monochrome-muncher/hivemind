@@ -20,9 +20,8 @@ from hivemind.embeddings import EmbeddingError, OpenAICompatEmbedder
 from hivemind.extractor import ExtractorError, OpenAICompatExtractor
 from hivemind.mcp.app import hive_search, hive_write
 from hivemind.memstore import MemoryStore
+from tests.builders import ALICE, make_rest_authenticator, mcp_app
 from tests.fakes import make_client, make_clock, make_search_config
-from tests.unit.test_api_endpoints import make_authenticator
-from tests.unit.test_mcp_app import ALICE, build_app
 
 KEY = "sk-SECRETKEYVALUE"
 BASE = "http://embed.test/v1"
@@ -154,7 +153,7 @@ class TestKeyNeverLeaks:
             Settings(),
             store=MemoryStore(make_clock()),
             embedder=_LeakyEmbedder(),
-            authenticator=make_authenticator(),
+            authenticator=make_rest_authenticator(),
             search_config=make_search_config(),
         )
         caplog.set_level(logging.DEBUG)
@@ -174,7 +173,7 @@ class TestKeyNeverLeaks:
 
     async def test_mcp_write_errors_and_search_degrades(self) -> None:
         clock = make_clock()
-        app = build_app(MemoryStore(clock), ALICE, clock)
+        app = mcp_app(MemoryStore(clock), ALICE, clock)
         app.search_service._embedder = _LeakyEmbedder()  # type: ignore[attr-defined]
         app.write_service._embedder = _LeakyEmbedder()  # type: ignore[attr-defined]
         written = await hive_write(app, kind="fact", summary="s")

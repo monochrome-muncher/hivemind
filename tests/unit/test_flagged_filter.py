@@ -11,13 +11,13 @@ from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import hive_feedback, hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 WRITER = agent_credential("writer", "fleet-a")
@@ -26,7 +26,7 @@ LURKER = agent_credential("lurker", "fleet-a", TrustLevel.LURKER)
 
 async def _seed(store: MemoryStore) -> dict[str, str]:
     """Four billing entries: one stale, one wrong, one helpful, one untouched."""
-    writer, lurker = mcp_surface(store, WRITER), mcp_surface(store, LURKER)
+    writer, lurker = mcp_app(store, WRITER), mcp_app(store, LURKER)
     ids: dict[str, str] = {}
     for name in ("stale", "wrong", "helpful", "untouched"):
         entry = await hive_write(writer, kind="fact", summary=f"billing {name} fact")
@@ -39,16 +39,16 @@ async def _seed(store: MemoryStore) -> dict[str, str]:
 async def test_mcp_list_flagged_returns_stale_and_wrong_only() -> None:
     store = MemoryStore(make_clock())
     ids = await _seed(store)
-    result = await hive_list(mcp_surface(store, WRITER), flagged=True)
+    result = await hive_list(mcp_app(store, WRITER), flagged=True)
     assert {e["id"] for e in result["entries"]} == {ids["stale"], ids["wrong"]}  # type: ignore[index]
-    unfiltered = await hive_list(mcp_surface(store, WRITER))
+    unfiltered = await hive_list(mcp_app(store, WRITER))
     assert len(unfiltered["entries"]) == 4  # type: ignore[arg-type]
 
 
 async def test_mcp_search_flagged() -> None:
     store = MemoryStore(make_clock())
     ids = await _seed(store)
-    result = await hive_search(mcp_surface(store, WRITER), query="billing fact", flagged=True)
+    result = await hive_search(mcp_app(store, WRITER), query="billing fact", flagged=True)
     assert {h["id"] for h in result["hits"]} == {ids["stale"], ids["wrong"]}  # type: ignore[index]
 
 
@@ -57,12 +57,12 @@ async def test_flagged_hides_entries_already_superseded() -> None:
     store = MemoryStore(make_clock())
     ids = await _seed(store)
     await hive_write(
-        mcp_surface(store, WRITER),
+        mcp_app(store, WRITER),
         kind="fact",
         summary="billing fact, corrected",
         supersedes=[ids["stale"]],
     )
-    result = await hive_list(mcp_surface(store, WRITER), flagged=True)
+    result = await hive_list(mcp_app(store, WRITER), flagged=True)
     assert {e["id"] for e in result["entries"]} == {ids["wrong"]}  # type: ignore[index]
 
 

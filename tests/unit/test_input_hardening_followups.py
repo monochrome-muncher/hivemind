@@ -25,9 +25,8 @@ from hivemind.mcp.app import hive_list, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.write import WriteService
+from tests.builders import ALICE, make_hivemind_app, mcp_app
 from tests.fakes import CountingEmbedder, make_client, make_clock, minimal_draft
-from tests.unit.test_api_endpoints import make_hivemind_app
-from tests.unit.test_mcp_app import ALICE, build_app
 
 KEY = {"X-API-Key": "key-alice"}
 ADMIN = {"X-API-Key": "key-admin"}
@@ -107,7 +106,7 @@ async def test_a_deep_payload_is_refused_on_rest_and_mcp_before_embedding() -> N
     assert resp.status_code == 422
     assert embedder.calls == 0
     assert listing.status_code == 200
-    mcp = build_app(MemoryStore(make_clock()), ALICE, make_clock())
+    mcp = mcp_app(MemoryStore(make_clock()), ALICE, make_clock())
     result = await hive_write(mcp, "fact", "s", payload=_nested(300))
     assert result["error"]["code"] == "invalid_input"  # type: ignore[index]
 
@@ -172,7 +171,7 @@ async def test_out_of_range_datetimes_are_422_on_rest_and_invalid_input_on_mcp()
                 headers=KEY,
             )
             assert listing.status_code == search.status_code == write.status_code == 422, value
-    mcp = build_app(MemoryStore(make_clock()), ALICE, make_clock())
+    mcp = mcp_app(MemoryStore(make_clock()), ALICE, make_clock())
     for value in BAD_DATES:
         for result in (
             await hive_search(mcp, "q", occurred_from=value),

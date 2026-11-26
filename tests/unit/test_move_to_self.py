@@ -6,8 +6,8 @@ from __future__ import annotations
 from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
+from tests.builders import ADMIN_HEADERS, CAROL_HEADERS, PAT_HEADERS, seed_portal
 from tests.fakes import make_client, make_embedder
-from tests.unit.test_portal_api import ADMIN, CAROL, PAT, _seed
 
 
 def _move(entry_id: str, surface: str = "admin") -> str:
@@ -27,19 +27,23 @@ async def _supersede(app, old_id: str, summary: str, **kw):  # type: ignore[no-u
 
 
 async def test_the_admin_moves_a_fleet_memory_out_of_the_fleets_sight() -> None:
-    app, blue, _red, _mine, in_blue, _by_bob, _in_red = await _seed()
+    app, blue, _red, _mine, in_blue, _by_bob, _in_red = await seed_portal()
     await app.store.pin_entry(blue.id, in_blue.id, "carol", limit=10)
     await app.store.record_feedback(
         Feedback(entry_id=in_blue.id, user="pat", agent="pat", verdict=Verdict.HELPFUL)
     )
     async with make_client(app) as client:
-        before = await client.post("/v1/portal/search", json={"query": "deploy"}, headers=PAT)
-        done = await client.post(
-            _move(in_blue.id), json={"reason": "meant for carol only"}, headers=ADMIN
+        before = await client.post(
+            "/v1/portal/search", json={"query": "deploy"}, headers=PAT_HEADERS
         )
-        again = await client.post(_move(in_blue.id), json={"reason": "twice"}, headers=ADMIN)
-        by_pat = await client.get(f"/v1/entries/{in_blue.id}", headers=PAT)
-        by_carol = await client.get(f"/v1/entries/{in_blue.id}", headers=CAROL)
+        done = await client.post(
+            _move(in_blue.id), json={"reason": "meant for carol only"}, headers=ADMIN_HEADERS
+        )
+        again = await client.post(
+            _move(in_blue.id), json={"reason": "twice"}, headers=ADMIN_HEADERS
+        )
+        by_pat = await client.get(f"/v1/entries/{in_blue.id}", headers=PAT_HEADERS)
+        by_carol = await client.get(f"/v1/entries/{in_blue.id}", headers=CAROL_HEADERS)
     assert in_blue.id in [h["entry_id"] for h in before.json()]
     assert done.status_code == 200, done.text
     body = done.json()
@@ -70,24 +74,26 @@ async def test_the_admin_moves_a_fleet_memory_out_of_the_fleets_sight() -> None:
 
 
 async def test_the_portal_moves_the_agents_own_memories_only() -> None:
-    app, blue, _red, mine, in_blue, by_bob, in_red = await _seed()
+    app, blue, _red, mine, in_blue, by_bob, in_red = await seed_portal()
     older = await _supersede(
         app, in_blue.id, "blue fleet deploy v2", scope="fleet", fleet_id=blue.id
     )
     async with make_client(app) as client:
-        no_reason = await client.post(_move(older.id, "portal"), json={}, headers=CAROL)
+        no_reason = await client.post(_move(older.id, "portal"), json={}, headers=CAROL_HEADERS)
         not_hers = await client.post(
-            _move(by_bob.id, "portal"), json={"reason": "no"}, headers=CAROL
+            _move(by_bob.id, "portal"), json={"reason": "no"}, headers=CAROL_HEADERS
         )
         unreadable = await client.post(
-            _move(in_red.id, "portal"), json={"reason": "no"}, headers=CAROL
+            _move(in_red.id, "portal"), json={"reason": "no"}, headers=CAROL_HEADERS
         )
-        private = await client.post(_move(mine.id, "portal"), json={"reason": "no"}, headers=CAROL)
+        private = await client.post(
+            _move(mine.id, "portal"), json={"reason": "no"}, headers=CAROL_HEADERS
+        )
         superseded = await client.post(
-            _move(in_blue.id, "portal"), json={"reason": "no"}, headers=CAROL
+            _move(in_blue.id, "portal"), json={"reason": "no"}, headers=CAROL_HEADERS
         )
         done = await client.post(
-            _move(older.id, "portal"), json={"reason": "a scratch note"}, headers=CAROL
+            _move(older.id, "portal"), json={"reason": "a scratch note"}, headers=CAROL_HEADERS
         )
     assert no_reason.status_code == 422
     assert not_hers.status_code == 403
@@ -108,10 +114,10 @@ async def test_the_portal_moves_the_agents_own_memories_only() -> None:
 
 
 async def test_a_memory_that_replaced_another_agents_is_refused_and_left_alone() -> None:
-    app, blue, _red, _mine, _in_blue, by_bob, _in_red = await _seed()
+    app, blue, _red, _mine, _in_blue, by_bob, _in_red = await seed_portal()
     hers = await _supersede(app, by_bob.id, "carol's take", scope="fleet", fleet_id=blue.id)
     async with make_client(app) as client:
-        refused = await client.post(_move(hers.id), json={"reason": "x"}, headers=ADMIN)
+        refused = await client.post(_move(hers.id), json={"reason": "x"}, headers=ADMIN_HEADERS)
     assert refused.status_code == 409
     assert "another agent" in refused.json()["error"]["message"]
     for entry_id in (hers.id, by_bob.id):
@@ -121,9 +127,9 @@ async def test_a_memory_that_replaced_another_agents_is_refused_and_left_alone()
 
 
 async def test_another_agent_cannot_supersede_the_moved_memory() -> None:
-    app, _blue, _red, _mine, in_blue, _by_bob, _in_red = await _seed()
+    app, _blue, _red, _mine, in_blue, _by_bob, _in_red = await seed_portal()
     async with make_client(app) as client:
-        await client.post(_move(in_blue.id), json={"reason": "private"}, headers=ADMIN)
+        await client.post(_move(in_blue.id), json={"reason": "private"}, headers=ADMIN_HEADERS)
         denied = await client.post(
             "/v1/entries",
             json={
@@ -133,7 +139,7 @@ async def test_another_agent_cannot_supersede_the_moved_memory() -> None:
                 "supersedes": [in_blue.id],
                 "agent": "a",
             },
-            headers=PAT,
+            headers=PAT_HEADERS,
         )
         own = await client.post(
             "/v1/entries",
@@ -144,7 +150,7 @@ async def test_another_agent_cannot_supersede_the_moved_memory() -> None:
                 "supersedes": [in_blue.id],
                 "agent": "a",
             },
-            headers=CAROL,
+            headers=CAROL_HEADERS,
         )
     assert denied.status_code in (403, 404, 409), denied.text
     assert own.status_code in (200, 201), own.text

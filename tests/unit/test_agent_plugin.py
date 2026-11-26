@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from hivemind.domain.access import Standing, TrustLevel
-from tests.unit.test_mcp_server import EXPECTED_TOOLS
+from tests.builders import EXPECTED_TOOLS
 
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "hivemind"

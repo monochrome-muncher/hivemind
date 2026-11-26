@@ -13,11 +13,9 @@ from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState
 from hivemind.mcp.app import McpHivemind, hive_get, hive_list
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
@@ -144,17 +142,7 @@ def _with(entry: Entry, **changes: object) -> Entry:
 
 
 def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
-    clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return McpHivemind(
-        read_service=_read(store),
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
+    return mcp_app(store, credential)
 
 
 async def test_mcp_get_and_list_drop_a_hidden_successor() -> None:

@@ -40,6 +40,7 @@ from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.search import SearchService
 from hivemind.services.write import WriteService
+from tests.builders import ALICE, ORG, make_hivemind_app, make_rest_authenticator, mcp_app
 from tests.fakes import (
     CountingEmbedder,
     RecordingStore,
@@ -49,8 +50,6 @@ from tests.fakes import (
     make_search_config,
     minimal_draft,
 )
-from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app
-from tests.unit.test_mcp_app import ALICE, ORG, build_app
 
 KEY = {"X-API-Key": "key-alice"}
 USER_KEY = {"X-API-Key": "key-alice-user"}  # no agent identity: self-reports it
@@ -252,7 +251,7 @@ async def test_rest_refuses_bad_reads_and_governance_input_with_422(
         Settings(),
         store=store,
         embedder=make_embedder(),
-        authenticator=make_authenticator(),
+        authenticator=make_rest_authenticator(),
         search_config=make_search_config(),
     )
     async with make_client(app) as client:
@@ -343,7 +342,7 @@ async def test_no_key_wins_over_a_malformed_body() -> None:
 
 
 async def test_mcp_caps_a_self_reported_agent() -> None:
-    app = build_app(MemoryStore(make_clock()), Credential(user_id="alice"), make_clock())
+    app = mcp_app(MemoryStore(make_clock()), Credential(user_id="alice"), make_clock())
     over = await hive_write(app, "fact", "s", agent="g" * (MAX_IDENTITY_CHARS + 1))
     assert over["error"]["code"] == "invalid_input", over  # type: ignore[index]
     ok = await hive_write(app, "fact", "s", agent="g" * MAX_IDENTITY_CHARS)
@@ -354,12 +353,12 @@ async def test_a_long_agent_id_from_the_key_still_writes() -> None:
     """Only the self-reported agent is capped; a key's own (legacy) agent
     identity is not (ADR 0040)."""
     legacy = Credential(user_id="alice", agent_id="g" * (MAX_IDENTITY_CHARS + 50))
-    app = build_app(MemoryStore(make_clock()), legacy, make_clock())
+    app = mcp_app(MemoryStore(make_clock()), legacy, make_clock())
     assert "error" not in await hive_write(app, "fact", "s")
 
 
 async def test_mcp_refuses_bad_input_with_invalid_input() -> None:
-    app = build_app(MemoryStore(make_clock()), ALICE, make_clock())
+    app = mcp_app(MemoryStore(make_clock()), ALICE, make_clock())
     cases = [
         await hive_write(app, "fact", "a\x00b"),
         await hive_write(app, "fact", "s", body="x" * (MAX_BODY_CHARS + 1)),
@@ -383,7 +382,7 @@ async def test_mcp_refuses_bad_input_with_invalid_input() -> None:
 
 
 async def test_mcp_get_with_nul_id_is_not_found() -> None:
-    app = build_app(MemoryStore(make_clock()), ALICE, make_clock())
+    app = mcp_app(MemoryStore(make_clock()), ALICE, make_clock())
     assert (await hive_get(app, "a\x00b"))["error"]["code"] == "not_found"  # type: ignore[index]
 
 
@@ -391,6 +390,6 @@ async def test_mcp_get_with_nul_id_is_not_found() -> None:
     "name", ["Admin", "admin ", "", "a\x00b", "x" * 100, "\uff41\uff44\uff4d\uff49\uff4e"]
 )
 async def test_mcp_register_reports_invalid_names_as_invalid_input(name: str) -> None:
-    app = build_app(MemoryStore(make_clock()), ORG, make_clock())
+    app = mcp_app(MemoryStore(make_clock()), ORG, make_clock())
     result = await hive_register(app, name)
     assert result["error"]["code"] == "invalid_input", result  # type: ignore[index]

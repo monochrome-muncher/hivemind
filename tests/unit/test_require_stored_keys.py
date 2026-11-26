@@ -238,7 +238,7 @@ def _mcp(store: MemoryStore, *, require: bool) -> Any:
     services = build_services(
         store, make_embedder(), make_search_config(), require_stored_keys=require
     )
-    app = McpHivemind.from_services(store, services, credential=dev_credential())
+    app = McpHivemind.from_services(services, credential=dev_credential())
     return build_server(app, credential_provider=dev_credential, require_stored_keys=require)
 
 
@@ -287,7 +287,7 @@ async def test_build_server_without_a_provider_still_applies_the_flag() -> None:
     services = build_services(
         store, make_embedder(), make_search_config(), require_stored_keys=True
     )
-    app = McpHivemind.from_services(store, services, credential=dev_credential())
+    app = McpHivemind.from_services(services, credential=dev_credential())
     server = build_server(app, require_stored_keys=True)
     got = await server.call_tool("hive_get", {"entry_id": fleet})
     wrote = await server.call_tool("hive_write", {"kind": "fact", "summary": "new note"})

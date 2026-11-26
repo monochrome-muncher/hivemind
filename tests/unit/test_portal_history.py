@@ -19,8 +19,8 @@ from hivemind.domain.access import TrustLevel
 from hivemind.domain.audit import ActorKind, AuditAction, AuditEvent
 from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.ports import Credential
+from tests.builders import make_hivemind_app
 from tests.fakes import make_client, make_embedder, make_rest_app
-from tests.unit.test_api_endpoints import make_hivemind_app
 
 CAROL = {"X-API-Key": "key-carol"}  # contributor in blue, inherits from "old"
 PAT = {"X-API-Key": "key-pat"}  # privileged in blue: reads every fleet
@@ -496,10 +496,10 @@ async def test_a_dormant_agent_is_refused_and_a_bad_limit_is_a_422() -> None:
 
 @pytest.mark.parametrize("what", ["locked", "revoked"])
 async def test_a_locked_or_revoked_key_gets_the_usual_refusal(what: str) -> None:
-    from tests.unit.test_key_lock import ADMIN, _active_agent
+    from tests.builders import ADMIN, active_agent
 
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app, "carol")
+    key = await active_agent(app, "carol")
     fake = app.authenticator._by_key[key]  # type: ignore[attr-defined]
     app.authenticator._by_key[key] = replace(  # type: ignore[attr-defined]
         fake, access_controlled=True, trust_level=TrustLevel.CONTRIBUTOR

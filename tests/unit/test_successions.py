@@ -10,14 +10,10 @@ request, as ``PgAuthenticator`` does (its own tests are in
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 
-from hivemind.api.deps import create_app
-from hivemind.api.main import create_app_for_config
-from hivemind.config import Settings
 from hivemind.domain.access import (
     AgentStatus,
     InvalidAgentStatus,
@@ -27,8 +23,8 @@ from hivemind.domain.access import (
     entry_is_visible,
     may_supersede,
 )
-from hivemind.domain.audit import AuditAction, AuditFilters
-from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
+from hivemind.domain.audit import AuditAction
+from hivemind.domain.entry import EntryFilters, Kind
 from hivemind.domain.feedback import FeedbackLogFilters
 from hivemind.domain.pin import Pin, PinRefusal, pin_refusal
 from hivemind.domain.succession import (
@@ -38,115 +34,10 @@ from hivemind.domain.succession import (
     owned_authors,
 )
 from hivemind.domain.validation import InvalidInput
-from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.ownership import own_author_filter
-from tests.fakes import FakeAuthenticator, make_embedder, make_search_config
-
-ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
-T0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-
-
-class TickingClock:
-    def __init__(self) -> None:
-        self._now = T0
-
-    def __call__(self) -> datetime:
-        self._now += timedelta(seconds=1)
-        return self._now
-
-
-class StoreAuthenticator(FakeAuthenticator):
-    """Resolves ``k-<name>`` from the agent's record and its successions on
-    every request, and only while the agent is active (ADR 0039)."""
-
-    def __init__(self, store: MemoryStore) -> None:
-        super().__init__(store=store)
-        self._records = store
-
-    async def verify(self, key: str) -> Credential | None:
-        if not key.startswith("k-"):
-            return await super().verify(key)
-        agent = await self._records.get_agent(key[2:])
-        if agent is None or agent.status is not AgentStatus.ACTIVE:
-            return None
-        return Credential(
-            user_id=agent.name,
-            agent_id=agent.name,
-            agent_name=agent.name,
-            access_controlled=True,
-            trust_level=agent.trust_level,
-            home_fleet_id=agent.home_fleet_id,
-            inherits_from=await self._records.inherited_authors(agent.name),
-        )
-
-
-class World:
-    def __init__(self) -> None:
-        self.store = MemoryStore(TickingClock())
-        self.auth = StoreAuthenticator(self.store)
-        self.app = create_app_for_config(
-            Settings(),
-            store=self.store,
-            embedder=make_embedder(),
-            authenticator=self.auth,
-            search_config=make_search_config(),
-        )
-        self.client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(self.app)), base_url="http://t"
-        )
-        self.successions = self.app.access_service.successions
-        self.blue = ""
-        self.red = ""
-
-    async def setup(self) -> World:
-        self.blue = (await self.store.create_fleet("blue")).id
-        self.red = (await self.store.create_fleet("red")).id
-        return self
-
-    async def agent(
-        self, name: str, fleet: str, level: TrustLevel = TrustLevel.CONTRIBUTOR
-    ) -> None:
-        await self.store.register_agent(name)
-        await self.store.activate_agent(name, trust_level=level, home_fleet_id=fleet)
-
-    async def entry(self, author: str, summary: str, scope: str = "self", fleet: str | None = None):
-        draft = EntryDraft(
-            kind=Kind.FACT,
-            summary=summary,
-            author=author,
-            agent=author,
-            scope=scope,
-            fleet_id=fleet,
-        )
-        return await self.store.create_entry(draft, await make_embedder().embed_text(summary))
-
-    def h(self, name: str) -> dict[str, str]:
-        return {"X-API-Key": f"k-{name}"}
-
-    async def get(self, name: str, entry_id: str) -> int:
-        return (await self.client.get(f"/v1/entries/{entry_id}", headers=self.h(name))).status_code
-
-    async def withdraw(self, name: str, entry_id: str, path: str = "/v1/entries/{}/withdraw"):
-        return await self.client.post(
-            path.format(entry_id), json={"reason": "obsolete"}, headers=self.h(name)
-        )
-
-    async def rate(self, name: str, entry_id: str) -> httpx.Response:
-        return await self.client.post(
-            f"/v1/entries/{entry_id}/feedback", json={"verdict": "helpful"}, headers=self.h(name)
-        )
-
-    async def write(self, name: str, summary: str, **body) -> httpx.Response:  # type: ignore[no-untyped-def]
-        return await self.client.post(
-            "/v1/entries",
-            json={"kind": "fact", "summary": summary, **body},
-            headers=self.h(name),
-        )
-
-    async def audit(self, action: AuditAction) -> list:  # type: ignore[type-arg]
-        return await self.store.list_audit(AuditFilters(action=action), 100)
+from tests.builders import ADMIN, ADMIN_H, T0, World, mcp_app
 
 
 @pytest.fixture
@@ -528,27 +419,14 @@ async def test_a_cycle_is_refused(w: World) -> None:
 
 async def test_mcp_tools_apply_the_same_ownership(w: World) -> None:
     from hivemind.mcp.app import McpHivemind, hive_get, hive_whoami, hive_withdraw
-    from hivemind.services.governance import GovernanceService
-    from hivemind.services.read import ReadService
-    from hivemind.services.search import SearchService
-    from hivemind.services.write import WriteService
-    from tests.fakes import make_clock
 
     note = await w.entry("old", "old private note")
     await retire(w)
 
     def mcp_for(name: str, inherits: tuple[str, ...]) -> McpHivemind:
-        gov = GovernanceService(w.store)
-        config = make_search_config()
-        return McpHivemind(
-            store=w.store,
-            write_service=WriteService(w.store, make_embedder()),
-            search_service=SearchService(w.store, make_embedder(), config, now_fn=make_clock()),
-            governance_service=gov,
-            read_service=ReadService(w.store, gov, config),
-            access_service=w.app.access_service,
-            search_config=config,
-            credential=Credential(
+        return mcp_app(
+            w.store,
+            Credential(
                 user_id=name,
                 agent_id=name,
                 agent_name=name,
@@ -557,6 +435,7 @@ async def test_mcp_tools_apply_the_same_ownership(w: World) -> None:
                 home_fleet_id=w.blue,
                 inherits_from=inherits,
             ),
+            access=w.app.access_service,
         )
 
     heir, stranger = mcp_for("heir", ("old",)), mcp_for("other", ())
@@ -732,9 +611,6 @@ async def test_listing_is_newest_first(w: World) -> None:
 
 
 # -- the admin routes ------------------------------------------------------------------
-
-
-ADMIN_H = {"X-API-Key": "hm_admin"}
 
 
 async def test_the_retire_route_previews_then_retires(w: World) -> None:

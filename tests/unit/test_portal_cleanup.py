@@ -18,8 +18,8 @@ from hivemind.domain.audit import ActorKind, AuditAction, AuditFilters
 from hivemind.domain.entry import EntryDraft, EntryState, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.memstore import MemoryStore
+from tests.builders import ADMIN, StoreAuthenticator, TickingClock
 from tests.fakes import make_embedder, make_search_config
-from tests.unit.test_successions import ADMIN, StoreAuthenticator, TickingClock
 
 ADMIN_H = {"X-API-Key": "hm_admin"}
 VEC = [1.0, 0.0, 0.0, 0.0]

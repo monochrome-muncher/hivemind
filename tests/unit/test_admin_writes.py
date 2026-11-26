@@ -13,12 +13,12 @@ from hivemind.domain.entry import EntryFilters
 from hivemind.mcp.app import hive_feedback, hive_get, hive_search, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 DEV = Credential(
@@ -34,8 +34,8 @@ ADMIN = Credential(user_id="admin", is_admin=True)
 
 async def test_an_admin_correction_of_a_fleet_entry_stays_readable_to_the_fleet() -> None:
     store = MemoryStore(make_clock())
-    old = await hive_write(mcp_surface(store, DEV), kind="fact", summary="the build cache is warm")
-    admin = mcp_surface(store, ADMIN)
+    old = await hive_write(mcp_app(store, DEV), kind="fact", summary="the build cache is warm")
+    admin = mcp_app(store, ADMIN)
 
     refused = await hive_write(
         admin,
@@ -65,7 +65,7 @@ async def test_an_admin_correction_of_a_fleet_entry_stays_readable_to_the_fleet(
         agent="ops",
     )
     assert fixed["scope"] == "org" and fixed["author"] == "admin"
-    dev = mcp_surface(store, DEV)
+    dev = mcp_app(store, DEV)
     assert (await hive_get(dev, str(fixed["id"])))["summary"] == "the build cache is cold"
     hits = (await hive_search(dev, "build cache"))["hits"]
     assert [h["id"] for h in hits] == [fixed["id"]]  # type: ignore[index]
@@ -111,8 +111,8 @@ AGENT = Credential(
 async def test_the_admin_key_has_one_feedback_vote_whatever_agent_it_reports() -> None:
     store = MemoryStore(make_clock())
     # Another agent's entry: nobody rates its own (ADR 0065).
-    entry = await hive_write(mcp_surface(store, AGENT), kind="fact", summary="s")
-    admin = mcp_surface(store, ADMIN)
+    entry = await hive_write(mcp_app(store, AGENT), kind="fact", summary="s")
+    admin = mcp_app(store, ADMIN)
     for label in ("a", "b", "c"):
         result = await hive_feedback(admin, str(entry["id"]), "helpful", agent=label)
         assert result["feedback"]["agent"] == "admin"  # type: ignore[index]
@@ -124,12 +124,10 @@ async def test_the_admin_key_has_one_feedback_vote_whatever_agent_it_reports() -
 async def test_the_admin_key_needs_no_agent_to_give_feedback() -> None:
     store = MemoryStore(make_clock())
     # Another agent's entry: nobody rates its own (ADR 0065).
-    entry = await hive_write(mcp_surface(store, AGENT), kind="fact", summary="s")
-    result = await hive_feedback(mcp_surface(store, ADMIN), str(entry["id"]), "stale")
+    entry = await hive_write(mcp_app(store, AGENT), kind="fact", summary="s")
+    result = await hive_feedback(mcp_app(store, ADMIN), str(entry["id"]), "stale")
     assert result["feedback"]["agent"] == "admin"  # type: ignore[index]
-    many = await hive_feedback(
-        mcp_surface(store, ADMIN), verdict="wrong", entry_ids=[str(entry["id"])]
-    )
+    many = await hive_feedback(mcp_app(store, ADMIN), verdict="wrong", entry_ids=[str(entry["id"])])
     assert "error" not in many
     assert await store.feedback_counts(str(entry["id"])) == (0, 0, 1)  # latest verdict wins
 
@@ -155,7 +153,7 @@ async def test_the_admin_key_needs_no_agent_to_give_feedback() -> None:
 
 async def test_an_agent_key_keeps_its_own_feedback_identity() -> None:
     store = MemoryStore(make_clock())
-    entry = await hive_write(mcp_surface(store, ADMIN), kind="fact", summary="s", agent="ops")
-    await hive_feedback(mcp_surface(store, AGENT), str(entry["id"]), "helpful", agent="other")
+    entry = await hive_write(mcp_app(store, ADMIN), kind="fact", summary="s", agent="ops")
+    await hive_feedback(mcp_app(store, AGENT), str(entry["id"]), "helpful", agent="other")
     rows = await store.list_feedback(str(entry["id"]), 10)
     assert [r.agent for r in rows] == ["ops-agent"]

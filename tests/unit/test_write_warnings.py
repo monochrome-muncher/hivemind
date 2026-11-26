@@ -16,12 +16,7 @@ from hivemind.domain.entry import Source, SourceType
 from hivemind.domain.validation import MAX_BODY_CHARS
 from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
+from hivemind.ports import Credential, Embedder
 from hivemind.services.write_warnings import (
     answers_open_question_warning,
     has_local_path,
@@ -29,6 +24,7 @@ from hivemind.services.write_warnings import (
     looks_non_english,
     near_duplicate_warning,
 )
+from tests.builders import mcp_app
 from tests.eval.domains import DOMAINS
 from tests.eval.golden import golden_corpus
 from tests.fakes import (
@@ -83,19 +79,10 @@ B = agent_credential("b", "fleet-b")
 LEAD = agent_credential("lead", "fleet-a", TrustLevel.PRIVILEGED)
 
 
-def _surface(store: MemoryStore, credential: Credential, embedder: object = None) -> McpHivemind:
-    clock, config = make_clock(), make_search_config()
-    embedder = embedder if embedder is not None else make_embedder()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
+def _surface(
+    store: MemoryStore, credential: Credential, embedder: Embedder | None = None
+) -> McpHivemind:
+    return mcp_app(store, credential, embedder=embedder)
 
 
 @pytest.mark.parametrize(

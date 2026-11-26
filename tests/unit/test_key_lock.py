@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from hivemind.api.deps import HivemindApp
 from hivemind.api.main import create_app_for_config
 from hivemind.config import Settings
 from hivemind.domain.access import AgentStatus, KeyLocked, TrustLevel
@@ -22,6 +21,7 @@ from hivemind.mcp.server import build_server
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
+from tests.builders import ADMIN, active_agent, make_mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     fake_key_id,
@@ -31,23 +31,14 @@ from tests.fakes import (
     make_search_config,
     make_store,
 )
-from tests.unit.test_mcp_http import make_app
 
-ADMIN = Credential(user_id="admin", is_admin=True, key_id="adminfinger1")
 ORG = Credential(user_id="org", is_org=True, access_controlled=True)
 ADMIN_H = {"X-API-Key": "hm_admin"}
 
 
-async def _active_agent(app: HivemindApp, name: str = "alice") -> str:
-    fleet = await app.store.create_fleet(f"fleet-{name}")
-    await app.store.register_agent(name)
-    _, key = await app.access_service.activate(name, TrustLevel.CONTRIBUTOR, fleet.id, ADMIN)
-    return key
-
-
 async def test_a_locked_key_fails_the_next_request_with_key_locked() -> None:
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app)
+    key = await active_agent(app)
     headers = {"X-API-Key": key}
     async with make_client(app) as client:
         assert (await client.get("/v1/whoami", headers=headers)).status_code == 200
@@ -65,7 +56,7 @@ async def test_a_locked_key_fails_the_next_request_with_key_locked() -> None:
 
 async def test_only_the_key_is_locked_the_agent_is_untouched() -> None:
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app)
+    key = await active_agent(app)
     before = await app.store.get_agent("alice")
     async with make_client(app) as client:
         await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})
@@ -80,8 +71,8 @@ async def test_only_the_key_is_locked_the_agent_is_untouched() -> None:
 
 async def test_the_admin_list_says_which_keys_are_locked_and_keeps_idle_working() -> None:
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app, "alice")
-    await _active_agent(app, "bob")
+    key = await active_agent(app, "alice")
+    await active_agent(app, "bob")
     async with make_client(app) as client:
         await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})
         rows = {
@@ -102,9 +93,9 @@ async def test_admin_and_org_keys_get_403_on_the_lock_route() -> None:
     assert admin.json()["error"]["code"] == "forbidden"
 
 
-async def test_replace_key_clears_the_lock_and_works_on_a_locked_active_agent() -> None:
+async def test_replace_key_clears_the_lock_and_works_on_a_lockedactive_agent() -> None:
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app)
+    key = await active_agent(app)
     async with make_client(app) as client:
         await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})
         replaced = await client.post("/v1/admin/agents/alice/key", headers=ADMIN_H)
@@ -119,7 +110,7 @@ async def test_replace_key_clears_the_lock_and_works_on_a_locked_active_agent() 
 
 async def test_revoking_a_locked_agent_still_works_and_its_key_is_just_unknown() -> None:
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app)
+    key = await active_agent(app)
     async with make_client(app) as client:
         await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})
         revoked = await client.post("/v1/admin/agents/alice/revoke", headers=ADMIN_H)
@@ -130,7 +121,7 @@ async def test_revoking_a_locked_agent_still_works_and_its_key_is_just_unknown()
 
 async def test_the_audit_row_is_an_agent_key_row_with_the_fingerprint_and_no_key() -> None:
     app = make_rest_app(bind_store=True)
-    key = await _active_agent(app)
+    key = await active_agent(app)
     async with make_client(app) as client:
         await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})
         await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})  # refused: locked
@@ -152,7 +143,7 @@ async def test_the_service_refuses_anything_but_an_agent_key() -> None:
             await service.lock_own_key(caller)
 
 
-async def test_verify_raises_key_locked_only_for_an_active_agent() -> None:
+async def test_verify_raises_key_locked_only_for_anactive_agent() -> None:
     store = make_store()
     auth = FakeAuthenticator(store=store)
     service = AccessService(store, auth)
@@ -205,7 +196,7 @@ async def test_a_mcp_tool_call_with_a_locked_key_returns_key_locked() -> None:
     async def reverify() -> Credential | None:
         return await auth.verify("key-alice")
 
-    server = build_server(make_app(alice), credential_provider=reverify)
+    server = build_server(make_mcp_app(alice), credential_provider=reverify)
     ok = await server.call_tool("hive_whoami", {})
     assert "error" not in json.loads(ok.content[0].text)
     auth._locked.add("key-alice")
@@ -227,7 +218,7 @@ async def test_a_press_for_a_key_replaced_meanwhile_answers_409_and_changes_noth
         authenticator=RacedAuth(store=store),
         search_config=make_search_config(),
     )
-    key = await _active_agent(app)
+    key = await active_agent(app)
     async with make_client(app) as client:
         pressed = await client.post("/v1/portal/key/lock", headers={"X-API-Key": key})
         still = await client.get("/v1/whoami", headers={"X-API-Key": key})

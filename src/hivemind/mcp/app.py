@@ -14,7 +14,6 @@ from typing import Annotated, Any
 from pydantic import WithJsonSchema
 
 from hivemind import wire
-from hivemind.config import SearchConfig
 from hivemind.domain.access import SCOPE_FLEET, SCOPE_ORG, SCOPE_SELF
 from hivemind.domain.entry import (
     SUMMARY_MAX_CHARS,
@@ -37,7 +36,7 @@ from hivemind.mcp.errors import (
     error_reply,
     service_error_reply,
 )
-from hivemind.ports import Credential, Store
+from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.drafts import entry_draft
 from hivemind.services.governance import GovernanceService
@@ -61,16 +60,14 @@ LOOSE_NOTE = (
 
 @dataclass(frozen=True, slots=True)
 class McpHivemind:
-    """What the tool functions operate on: the services, the store (for reads the services do not
-    expose) and the acting ``credential`` (SPEC §8.1, ADR 0012)."""
+    """What the tool functions operate on: the services and the acting ``credential`` (SPEC §8.1,
+    ADR 0012)."""
 
-    store: Store
     write_service: WriteService
     read_service: ReadService
     search_service: SearchService
     governance_service: GovernanceService
     access_service: AccessService
-    search_config: SearchConfig
     credential: Credential
     # Called once per degraded search, so the HTTP runner can count them.
     on_degraded_search: Callable[[], None] | None = None
@@ -78,20 +75,17 @@ class McpHivemind:
     @classmethod
     def from_services(
         cls,
-        store: Store,
         services: Services,
         credential: Credential,
         on_degraded_search: Callable[[], None] | None = None,
     ) -> McpHivemind:
         """Bind the shared services to ``credential``."""
         return cls(
-            store=store,
             write_service=services.write_service,
             read_service=services.read_service,
             search_service=services.search_service,
             governance_service=services.governance_service,
             access_service=services.access_service,
-            search_config=services.search_config,
             credential=credential,
             on_degraded_search=on_degraded_search,
         )

@@ -93,9 +93,8 @@ async def test_mcp_app_from_services_binds_the_credential() -> None:
     store = make_store()
     services = build_services(store, make_embedder(), make_search_config())
     credential = Credential(user_id="dev", agent_id="hivemind-mcp")
-    app = McpHivemind.from_services(store, services, credential=credential)
+    app = McpHivemind.from_services(services, credential=credential)
     assert app.credential is credential
-    assert app.store is store
     assert app.write_service is services.write_service
     written = await hive_write(app, kind="fact", summary="bound to the dev credential")
     assert written["author"] == "dev"

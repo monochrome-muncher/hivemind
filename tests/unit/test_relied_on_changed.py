@@ -15,6 +15,7 @@ from hivemind.domain.access import TrustLevel
 from hivemind.mcp.app import hive_feedback, hive_list, hive_withdraw, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
+from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
     FixedClock,
@@ -22,7 +23,6 @@ from tests.fakes import (
     make_clock,
     make_embedder,
     make_search_config,
-    mcp_surface,
 )
 
 
@@ -49,16 +49,16 @@ ADMIN = Credential(user_id="admin", is_admin=True)
 
 
 async def _entry(store: MemoryStore, summary: str, **kw: object) -> str:
-    out = await hive_write(mcp_surface(store, AUTHOR), kind="fact", summary=summary, **kw)  # type: ignore[arg-type]
+    out = await hive_write(mcp_app(store, AUTHOR), kind="fact", summary=summary, **kw)  # type: ignore[arg-type]
     return str(out["id"])
 
 
 async def _rate(store: MemoryStore, who: Credential, entry_id: str, verdict: str) -> None:
-    await hive_feedback(mcp_surface(store, who), entry_id, verdict=verdict, note="checked")
+    await hive_feedback(mcp_app(store, who), entry_id, verdict=verdict, note="checked")
 
 
 async def _relied(store: MemoryStore, who: Credential) -> dict[str, dict[str, object]]:
-    out = await hive_list(mcp_surface(store, who), relied_on_changed=True)
+    out = await hive_list(mcp_app(store, who), relied_on_changed=True)
     return {str(e["id"]): e for e in out["entries"]}  # type: ignore[attr-defined]
 
 
@@ -92,7 +92,7 @@ async def test_a_withdrawn_entry_is_listed() -> None:
     store = _store()
     gone = await _entry(store, "to be withdrawn")
     await _rate(store, ME, gone, "helpful")
-    await hive_withdraw(mcp_surface(store, AUTHOR), gone, reason="obsolete")
+    await hive_withdraw(mcp_app(store, AUTHOR), gone, reason="obsolete")
     assert (await _relied(store, ME))[gone]["state"] == "withdrawn"
 
 
@@ -128,7 +128,7 @@ async def test_an_entry_the_caller_can_no_longer_read_is_not_listed() -> None:
 
 async def test_no_agent_identity_is_an_error_on_both_surfaces() -> None:
     store = _store()
-    out = await hive_list(mcp_surface(store, ORG), relied_on_changed=True)
+    out = await hive_list(mcp_app(store, ORG), relied_on_changed=True)
     assert out["error"]["code"] == "agent_unresolved"  # type: ignore[index]
     async with _rest(store, "org-k", ORG) as client:
         resp = await client.get("/v1/entries", params={"relied_on_changed": "true"})
@@ -158,7 +158,7 @@ async def test_include_body_returns_full_entries_with_the_counts() -> None:
     old = await _entry(store, "pool is 20", body="the long form")
     await _rate(store, ME, old, "helpful")
     await _entry(store, "pool is 90", supersedes=[old])
-    out = await hive_list(mcp_surface(store, ME), relied_on_changed=True, include_body=True)
+    out = await hive_list(mcp_app(store, ME), relied_on_changed=True, include_body=True)
     [item] = out["entries"]  # type: ignore[misc]
     assert item["id"] == old and item["body"] == "the long form"
     assert item["state"] == "superseded" and item["feedback"]["helpful"] == 1
@@ -169,7 +169,7 @@ async def test_an_explicit_include_inactive_false_still_lists_inactive_entries()
     old = await _entry(store, "pool is 20")
     await _rate(store, ME, old, "helpful")
     await _entry(store, "pool is 90", supersedes=[old])
-    out = await hive_list(mcp_surface(store, ME), relied_on_changed=True, include_inactive=False)
+    out = await hive_list(mcp_app(store, ME), relied_on_changed=True, include_inactive=False)
     assert [e["id"] for e in out["entries"]] == [old]  # type: ignore[attr-defined]
 
 
@@ -181,7 +181,7 @@ async def test_the_list_pages_with_limit_and_offset() -> None:
         await _rate(store, ME, entry, "helpful")
         await _rate(store, OTHER, entry, "wrong")
         ids.append(entry)
-    surface = mcp_surface(store, ME)
+    surface = mcp_app(store, ME)
     first = await hive_list(surface, relied_on_changed=True, limit=2)
     second = await hive_list(surface, relied_on_changed=True, limit=2, offset=2)
     got = [e["id"] for e in first["entries"]] + [e["id"] for e in second["entries"]]  # type: ignore[attr-defined]

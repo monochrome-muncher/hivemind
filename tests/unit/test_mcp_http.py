@@ -26,7 +26,6 @@ import pytest
 from hivemind.config import Settings
 from hivemind.domain.access import StoreUnavailable, TrustLevel
 from hivemind.domain.entry import EntryFilters
-from hivemind.mcp.app import McpHivemind
 from hivemind.mcp.http import (
     BearerAuthMiddleware,
     _current_credential,
@@ -38,43 +37,11 @@ from hivemind.mcp.http import (
 from hivemind.mcp.server import build_server
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder, make_search_config
+from tests.builders import HTTP_ALICE, StaticAuthenticator, make_mcp_app
+from tests.fakes import make_clock, make_embedder
 
-ALICE = Credential(user_id="alice", agent_id="agent-a")
 BOB = Credential(user_id="bob", agent_id="agent-b")
 PLACEHOLDER = Credential(user_id="placeholder", agent_id="placeholder-agent")
-
-
-def make_app(credential: Credential) -> McpHivemind:
-    """A minimal ``MemoryStore``-backed ``McpHivemind`` (fake ports)."""
-    clock = make_clock()
-    store = MemoryStore(clock)
-    config = make_search_config()
-    return McpHivemind(
-        read_service=ReadService(store, GovernanceService(store, config), config),
-        store=store,
-        write_service=WriteService(store, make_embedder()),
-        search_service=SearchService(store, make_embedder(), config, now_fn=clock),
-        governance_service=GovernanceService(store, config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
-
-
-class FakeAuthenticator:
-    """Dict-backed ``Authenticator`` (the ``Authenticator`` port)."""
-
-    def __init__(self, keys: dict[str, Credential]) -> None:
-        self._keys = keys
-
-    async def verify(self, key: str) -> Credential | None:
-        return self._keys.get(key)
 
 
 # --- build_server's per-request credential_provider seam ------------------
@@ -83,44 +50,47 @@ class FakeAuthenticator:
 async def test_provider_rebinds_credential() -> None:
     """With a provider, each dispatch acts as the provider's credential
     (the shared services, re-bound to it), not the app's placeholder."""
-    app = make_app(PLACEHOLDER)
-    server = build_server(app, credential_provider=lambda: ALICE)
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(PLACEHOLDER, store)
+    server = build_server(app, credential_provider=lambda: HTTP_ALICE)
     result = await server.call_tool("hive_write", {"kind": "fact", "summary": "via provider"})
     assert result.is_error is False
     payload = json.loads(result.content[0].text)
-    stored = await app.store.get_entry(payload["id"])
+    stored = await store.get_entry(payload["id"])
     assert stored is not None
-    assert stored.author == ALICE.user_id
-    assert stored.agent == ALICE.agent_id
+    assert stored.author == HTTP_ALICE.user_id
+    assert stored.agent == HTTP_ALICE.agent_id
 
 
 async def test_provider_varying_credential_per_dispatch() -> None:
     """The provider is consulted *per dispatch*, so successive dispatches
     can act as different agents (the shared pool, different provenance)."""
-    app = make_app(PLACEHOLDER)
-    current: list[Credential] = [ALICE]
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(PLACEHOLDER, store)
+    current: list[Credential] = [HTTP_ALICE]
     server = build_server(app, credential_provider=lambda: current[0])
 
-    current[0] = ALICE
+    current[0] = HTTP_ALICE
     res_a = await server.call_tool("hive_write", {"kind": "fact", "summary": "a"})
     current[0] = BOB
     res_b = await server.call_tool("hive_write", {"kind": "fact", "summary": "b"})
 
     assert res_a.is_error is False and res_b.is_error is False
-    entry_a = await app.store.get_entry(json.loads(res_a.content[0].text)["id"])
-    entry_b = await app.store.get_entry(json.loads(res_b.content[0].text)["id"])
-    assert entry_a is not None and entry_a.agent == ALICE.agent_id
+    entry_a = await store.get_entry(json.loads(res_a.content[0].text)["id"])
+    entry_b = await store.get_entry(json.loads(res_b.content[0].text)["id"])
+    assert entry_a is not None and entry_a.agent == HTTP_ALICE.agent_id
     assert entry_b is not None and entry_b.agent == BOB.agent_id
 
 
 async def test_no_provider_uses_app_credential() -> None:
     """Without a provider (the stdio / dev path), the fixed ``app`` is used
     and its own credential is what each dispatch acts as."""
-    app = make_app(BOB)
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(BOB, store)
     server = build_server(app)
     result = await server.call_tool("hive_write", {"kind": "fact", "summary": "fixed"})
     assert result.is_error is False
-    stored = await app.store.get_entry(json.loads(result.content[0].text)["id"])
+    stored = await store.get_entry(json.loads(result.content[0].text)["id"])
     assert stored is not None
     assert stored.author == BOB.user_id
     assert stored.agent == BOB.agent_id
@@ -150,7 +120,7 @@ class _RecordingApp:
 
 
 async def test_middleware_valid_key_sets_credential_and_dispatches() -> None:
-    auth = FakeAuthenticator({"key-alice": ALICE})
+    auth = StaticAuthenticator({"key-alice": HTTP_ALICE})
     inner = _RecordingApp()
     mw = BearerAuthMiddleware(inner, auth)
     sent: list[dict[str, Any]] = []
@@ -160,7 +130,7 @@ async def test_middleware_valid_key_sets_credential_and_dispatches() -> None:
 
     await mw(_scope([(b"authorization", b"Bearer key-alice")]), _noop_receive, send)
     assert inner.called
-    assert inner.cred == ALICE
+    assert inner.cred == HTTP_ALICE
     assert not sent  # the middleware forwards; the inner app owns the response
 
 
@@ -168,7 +138,7 @@ async def test_middleware_valid_key_sets_credential_and_dispatches() -> None:
     "headers", [[], [(b"authorization", b"Bearer key-stranger")]], ids=["missing", "unknown"]
 )
 async def test_middleware_missing_or_unknown_key_401s(headers: list[tuple[bytes, bytes]]) -> None:
-    auth = FakeAuthenticator({"key-alice": ALICE})
+    auth = StaticAuthenticator({"key-alice": HTTP_ALICE})
     inner = _RecordingApp()
     mw = BearerAuthMiddleware(inner, auth)
     sent: list[dict[str, Any]] = []
@@ -185,7 +155,7 @@ async def _through_middleware(
     headers: list[tuple[bytes, bytes]],
 ) -> tuple[_RecordingApp, list[dict[str, Any]]]:
     inner = _RecordingApp()
-    mw = BearerAuthMiddleware(inner, FakeAuthenticator({"key-alice": ALICE, "key-bob": BOB}))
+    mw = BearerAuthMiddleware(inner, StaticAuthenticator({"key-alice": HTTP_ALICE, "key-bob": BOB}))
     sent: list[dict[str, Any]] = []
 
     async def send(msg: dict[str, Any]) -> None:
@@ -198,7 +168,7 @@ async def _through_middleware(
 @pytest.mark.parametrize("header", [b"X-Api-Key", b"x-api-key"])
 async def test_middleware_accepts_the_x_api_key_header(header: bytes) -> None:
     inner, sent = await _through_middleware([(header, b"  key-alice ")])
-    assert inner.cred == ALICE
+    assert inner.cred == HTTP_ALICE
     assert not sent
 
 
@@ -212,7 +182,7 @@ async def test_middleware_bearer_takes_precedence_over_x_api_key() -> None:
     inner, _ = await _through_middleware(
         [(b"x-api-key", b"key-bob"), (b"authorization", b"Bearer key-alice")]
     )
-    assert inner.cred == ALICE
+    assert inner.cred == HTTP_ALICE
 
 
 async def test_middleware_an_unknown_bearer_key_does_not_fall_back_to_x_api_key() -> None:
@@ -227,12 +197,12 @@ async def test_middleware_a_non_bearer_authorization_scheme_falls_back_to_x_api_
     inner, _ = await _through_middleware(
         [(b"authorization", b"Basic dXNlcjpwdw=="), (b"x-api-key", b"key-alice")]
     )
-    assert inner.cred == ALICE
+    assert inner.cred == HTTP_ALICE
 
 
 async def test_middleware_non_http_scope_passes_through() -> None:
     """Non-HTTP scopes (e.g. ``lifespan``) bypass auth entirely."""
-    auth = FakeAuthenticator({"key-alice": ALICE})
+    auth = StaticAuthenticator({"key-alice": HTTP_ALICE})
     inner = _RecordingApp()
     mw = BearerAuthMiddleware(inner, auth)
 
@@ -252,9 +222,9 @@ async def test_credential_provider_is_the_context_var_getter() -> None:
     unset -> ``None``; set (as the middleware does) -> the set credential."""
     provider = make_credential_provider()
     assert provider() is None
-    token = _current_credential.set(ALICE)
+    token = _current_credential.set(HTTP_ALICE)
     try:
-        assert provider() == ALICE
+        assert provider() == HTTP_ALICE
     finally:
         _current_credential.reset(token)
     assert provider() is None
@@ -267,7 +237,8 @@ async def test_provider_returning_none_fails_closed() -> None:
     """MCP-5 / AUTH-7a: a provider that yields no credential must NOT fall
     back to the app's own (template) credential: every verb answers
     ``unauthenticated`` and nothing is read or written."""
-    app = make_app(Credential(user_id="shared", agent_id="template"))
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(Credential(user_id="shared", agent_id="template"), store)
     server = build_server(app, credential_provider=lambda: None)
     for tool, args in (
         ("hive_write", {"kind": "fact", "summary": "x"}),
@@ -276,16 +247,16 @@ async def test_provider_returning_none_fails_closed() -> None:
     ):
         result = await server.call_tool(tool, args)
         assert json.loads(result.content[0].text)["error"]["code"] == "unauthenticated", tool
-    assert await app.store.list_entries(EntryFilters()) == []
+    assert await store.list_entries(EntryFilters()) == []
 
 
 async def test_async_provider_is_awaited_per_dispatch() -> None:
-    app = make_app(PLACEHOLDER)
+    app = make_mcp_app(PLACEHOLDER)
     calls: list[int] = []
 
     async def provider() -> Credential | None:
         calls.append(1)
-        return ALICE
+        return HTTP_ALICE
 
     server = build_server(app, credential_provider=provider)
     await server.call_tool("hive_whoami", {})
@@ -294,7 +265,7 @@ async def test_async_provider_is_awaited_per_dispatch() -> None:
 
 
 async def test_401_carries_www_authenticate_bearer() -> None:
-    mw = BearerAuthMiddleware(_RecordingApp(), FakeAuthenticator({}))
+    mw = BearerAuthMiddleware(_RecordingApp(), StaticAuthenticator({}))
     sent: list[dict[str, Any]] = []
 
     async def send(msg: dict[str, Any]) -> None:
@@ -310,7 +281,7 @@ async def test_oauth_discovery_paths_answer_404_without_touching_the_authenticat
     """ONB-8: there is no OAuth; clients probing ``/.well-known/oauth-*``
     must see 404, not a 401 that starts an OAuth flow."""
 
-    class ExplodingAuth(FakeAuthenticator):
+    class ExplodingAuth(StaticAuthenticator):
         async def verify(self, key: str) -> Credential | None:
             raise AssertionError("discovery must not reach the authenticator")
 
@@ -366,7 +337,7 @@ def test_built_app_rejects_a_foreign_host_when_hosts_are_set() -> None:
         Settings(mcp_allowed_hosts="hive.example.com"),
         MemoryStore(),
         make_embedder(),
-        FakeAuthenticator({"k": ALICE}),
+        StaticAuthenticator({"k": HTTP_ALICE}),
     )
     headers = {
         "authorization": "Bearer k",
@@ -412,12 +383,12 @@ async def test_reverified_credential_revocation_and_demotion_apply_next_call() -
         home_fleet_id="fleet-1",
     )
     keys: dict[str, Credential] = {"key-alice": contributor}
-    auth = FakeAuthenticator(keys)
+    auth = StaticAuthenticator(keys)
 
     async def reverify() -> Credential | None:
         return await auth.verify("key-alice")
 
-    server = build_server(make_app(PLACEHOLDER), credential_provider=reverify)
+    server = build_server(make_mcp_app(PLACEHOLDER), credential_provider=reverify)
 
     ok = await server.call_tool("hive_write", {"kind": "fact", "summary": "one"})
     assert "id" in json.loads(ok.content[0].text)
@@ -435,7 +406,7 @@ async def test_reverified_credential_revocation_and_demotion_apply_next_call() -
 
 
 async def test_key_verification_timeout_answers_503_with_retry_after() -> None:
-    class SlowAuth(FakeAuthenticator):
+    class SlowAuth(StaticAuthenticator):
         async def verify(self, key: str) -> Credential | None:
             raise TimeoutError
 
@@ -456,7 +427,7 @@ async def test_key_verification_timeout_answers_503_with_retry_after() -> None:
 async def test_key_verification_store_failure_answers_503_and_logs_only_the_type(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    class DownAuth(FakeAuthenticator):
+    class DownAuth(StaticAuthenticator):
         async def verify(self, key: str) -> Credential | None:
             raise StoreUnavailable("ConnectionRefusedError")
 
@@ -478,12 +449,13 @@ async def test_key_verification_store_failure_answers_503_and_logs_only_the_type
 
 
 async def test_a_store_timeout_inside_a_tool_is_store_unavailable() -> None:
-    app = make_app(ALICE)
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(HTTP_ALICE, store)
 
     async def timed_out(*_args: Any, **_kwargs: Any) -> Any:
         raise TimeoutError
 
-    app.store.list_entries = timed_out  # type: ignore[method-assign]
+    store.list_entries = timed_out  # type: ignore[method-assign]
     server = build_server(app)
     result = await server.call_tool("hive_list", {})
     error = json.loads(result.content[0].text)["error"]
@@ -495,6 +467,6 @@ async def test_a_provider_timeout_while_resolving_the_key_is_store_unavailable()
     async def provider() -> Credential | None:
         raise TimeoutError
 
-    server = build_server(make_app(PLACEHOLDER), credential_provider=provider)
+    server = build_server(make_mcp_app(PLACEHOLDER), credential_provider=provider)
     result = await server.call_tool("hive_whoami", {})
     assert json.loads(result.content[0].text)["error"]["code"] == "store_unavailable"

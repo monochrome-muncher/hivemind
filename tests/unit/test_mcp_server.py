@@ -19,48 +19,18 @@ from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.mcp.server import build_server, compact_schema
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder, make_search_config
-
-EXPECTED_TOOLS = [
-    "hive_write",
-    "hive_search",
-    "hive_get",
-    "hive_list",
-    "hive_withdraw",
-    "hive_feedback",
-    "hive_pin",
-    "hive_pinned",
-    "hive_register",
-    "hive_whoami",
-]
-
-
-def make_app() -> McpHivemind:
-    """A minimal MemoryStore-backed ``McpHivemind`` for the server tests."""
-    clock = make_clock()
-    store = MemoryStore(clock)
-    embedder = make_embedder()
-    config = make_search_config()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
-    )
+from tests.builders import EXPECTED_TOOLS, make_mcp_app, mcp_app
+from tests.fakes import make_clock
 
 
 @pytest.fixture
-def app() -> McpHivemind:
-    return make_app()
+def store() -> MemoryStore:
+    return MemoryStore(make_clock())
+
+
+@pytest.fixture
+def app(store: MemoryStore) -> McpHivemind:
+    return make_mcp_app(store=store)
 
 
 async def test_build_server_registers_expected_tools(app: McpHivemind) -> None:
@@ -70,7 +40,7 @@ async def test_build_server_registers_expected_tools(app: McpHivemind) -> None:
     assert names == sorted(EXPECTED_TOOLS)
 
 
-async def test_registered_write_tool_roundtrip(app: McpHivemind) -> None:
+async def test_registered_write_tool_roundtrip(app: McpHivemind, store: MemoryStore) -> None:
     """The registered ``hive_write`` tool, called through ``call_tool``,
     delegates to the plain function and persists into the store."""
     server = build_server(app)
@@ -81,7 +51,7 @@ async def test_registered_write_tool_roundtrip(app: McpHivemind) -> None:
     assert payload["kind"] == "fact"
     assert "id" in payload
     # The write went through the plain function into the shared store.
-    stored = await app.store.get_entry(payload["id"])
+    stored = await store.get_entry(payload["id"])
     assert stored is not None
     assert stored.summary == "hello via mcp"
 
@@ -147,8 +117,6 @@ async def _l2_app() -> tuple[McpHivemind, str]:
     """An L2 (contributor) agent with a home fleet, wired into a server."""
     clock = make_clock()
     store = MemoryStore(clock)
-    embedder = make_embedder()
-    config = make_search_config()
     fleet = await store.create_fleet("eng")
     await store.register_agent("carol")
     await store.activate_agent("carol", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fleet.id)
@@ -160,17 +128,7 @@ async def _l2_app() -> tuple[McpHivemind, str]:
         trust_level=TrustLevel.CONTRIBUTOR,
         home_fleet_id=fleet.id,
     )
-    app = McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=cred,
-    )
-    return app, fleet.id
+    return mcp_app(store, cred, clock), fleet.id
 
 
 async def test_registered_write_omitted_scope_defaults_to_max_permitted() -> None:
@@ -215,8 +173,9 @@ async def test_registered_feedback_empty_entry_id_is_invalid_input() -> None:
 
 async def _app_with_entity_entry() -> McpHivemind:
     """A minimal app holding one entry that carries extracted facets."""
-    app = make_app()
-    await app.store.create_entry(
+    store = MemoryStore(make_clock())
+    app = make_mcp_app(store=store)
+    await store.create_entry(
         EntryDraft(
             kind=Kind.FACT,
             summary="Postgres connection pool exhausted",
@@ -260,7 +219,7 @@ async def test_registered_list_tool_accepts_entities_param() -> None:
 async def test_registered_tool_schema_exposes_entities_param() -> None:
     """The generated MCP input schema for hive_search / hive_list includes
     the optional 'entities' param (mirroring 'tags')."""
-    server = build_server(make_app())
+    server = build_server(make_mcp_app())
     tools = {t.name: t for t in await server.list_tools()}
     for name in ("hive_search", "hive_list"):
         props = tools[name].input_schema.get("properties", {})
@@ -268,7 +227,7 @@ async def test_registered_tool_schema_exposes_entities_param() -> None:
 
 
 async def test_registered_list_tool_exposes_include_body_param() -> None:
-    server = build_server(make_app())
+    server = build_server(make_mcp_app())
     tools = {t.name: t for t in await server.list_tools()}
     assert "include_body" in tools["hive_list"].input_schema.get("properties", {})
 
@@ -277,7 +236,7 @@ async def test_hive_write_sources_schema_is_typed() -> None:
     """The exposed ``hive_write`` ``sources`` schema is typed to the entry
     model (ADR 0105): items are ``{type, ref}`` with the ``type`` enum, both
     required, no extra keys. It stays optional (not in ``required``)."""
-    server = build_server(make_app())
+    server = build_server(make_mcp_app())
     tools = {t.name: t for t in await server.list_tools()}
     schema = tools["hive_write"].input_schema
     assert "sources" not in schema.get("required", [])
@@ -290,7 +249,7 @@ async def test_hive_write_sources_schema_is_typed() -> None:
 
 
 async def test_schemas_state_the_bounds_the_server_checks() -> None:
-    tools = {t.name: t for t in await build_server(make_app()).list_tools()}
+    tools = {t.name: t for t in await build_server(make_mcp_app()).list_tools()}
     write = tools["hive_write"].input_schema["properties"]
     assert write["kind"] == {"enum": ["fact", "insight", "decision"], "type": "string"}
     assert write["summary"] == {"maxLength": 280, "type": "string"}
@@ -307,7 +266,7 @@ async def test_schemas_state_the_bounds_the_server_checks() -> None:
 async def test_values_outside_the_schema_still_get_a_structured_refusal() -> None:
     """The schema only advertises the bounds: a value outside them reaches the tool's own check,
     so the agent gets the readable refusal and the metrics count it."""
-    server = build_server(make_app())
+    server = build_server(make_mcp_app())
     for tool, args, code in (
         ("hive_write", {"kind": "note", "summary": "s"}, "invalid_input"),
         ("hive_write", {"kind": "fact", "summary": "x" * 281}, "invalid_input"),
@@ -324,7 +283,7 @@ async def test_hive_write_malformed_source_is_structured_invalid_input() -> None
     """A malformed source still answers the structured ``invalid_input``
     envelope (not a raw SDK ``is_error``), because the runtime stays lenient
     (ADR 0105)."""
-    server = build_server(make_app())
+    server = build_server(make_mcp_app())
     for bad in (
         [{"type": "bogus", "ref": "x"}],
         [{"type": "url"}],
@@ -339,7 +298,7 @@ async def test_hive_write_malformed_source_is_structured_invalid_input() -> None
 
 
 async def test_hive_write_valid_source_roundtrips() -> None:
-    server = build_server(make_app())
+    server = build_server(make_mcp_app())
     result = await server.call_tool(
         "hive_write",
         {

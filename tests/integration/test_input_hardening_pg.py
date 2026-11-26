@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from tests.builders import KeyedAuthenticator
 from tests.fakes import FakeEmbedder, make_search_config
 from tests.pg import ensure_migrated, reset_tables
-from tests.unit.test_api_endpoints import FakeAuthenticator
 
 from hivemind.api.deps import create_app
 from hivemind.api.main import create_app_for_config
@@ -33,7 +33,7 @@ async def client():
     await ensure_migrated(dsn, settings.embedding_dim)
     await reset_tables(dsn)
     store = PgStore(dsn)
-    authenticator = FakeAuthenticator(
+    authenticator = KeyedAuthenticator(
         {
             "key-alice": Credential(user_id="alice", agent_id="agent-alice"),
             "key-admin": Credential(user_id="ops", agent_id="admin-agent", is_admin=True),
