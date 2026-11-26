@@ -55,7 +55,7 @@ async def test_the_admin_moves_a_fleet_memory_out_of_the_fleets_sight() -> None:
     assert by_carol.status_code == 200 and by_carol.json()["scope"] == "self"
     assert await app.store.list_pins(blue.id) == []
     # The rating stays on the memory, for its author.
-    summary = await app.governance_service.feedback_summary(in_blue.id)
+    summary = await app.feedback_service.feedback_summary(in_blue.id)
     assert summary.helpful == 1
     [moved] = await app.store.list_audit(AuditFilters(action=AuditAction.ENTRY_MOVE_TO_SELF), 10)
     assert moved.actor_kind is ActorKind.ADMIN_KEY and moved.target == in_blue.id

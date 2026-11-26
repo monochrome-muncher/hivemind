@@ -20,11 +20,18 @@ from hivemind.domain.validation import MAX_REQUEST_BODY_BYTES, InvalidInput
 from hivemind.ports import Authenticator, Credential, Embedder, Store
 from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
+from hivemind.services.agent_cleanup import AgentCleanupService
+from hivemind.services.agent_history import AgentHistoryService
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.fleet_activity import FleetActivityService
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import MetricsService
+from hivemind.services.offboarding import OffboardingService
+from hivemind.services.pins import PinService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.successions import SuccessionService
 from hivemind.services.write import WriteService
 
 if TYPE_CHECKING:
@@ -46,6 +53,13 @@ class HivemindApp:
     governance_service: GovernanceService
     search_service: SearchService
     access_service: AccessService
+    feedback_service: FeedbackService
+    pin_service: PinService
+    merge_service: FleetMergeService
+    succession_service: SuccessionService
+    offboarding_service: OffboardingService
+    cleanup_service: AgentCleanupService
+    history_service: AgentHistoryService
     metrics_service: MetricsService
     activity_service: ActivityService
     fleet_activity_service: FleetActivityService

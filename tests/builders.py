@@ -24,7 +24,7 @@ from hivemind.domain.feedback import Correction, Verdict
 from hivemind.domain.upstream import UpstreamChange, UpstreamChangeKind
 from hivemind.mcp.app import McpHivemind
 from hivemind.memstore import MemoryStore
-from hivemind.ports import Credential, Embedder, Extractor, KeyReplacement, Store
+from hivemind.ports import Authenticator, Credential, Embedder, Extractor, KeyReplacement, Store
 from hivemind.services.access import AccessService
 from hivemind.services.search import Hit, SearchService, SimilarEntry
 from hivemind.services.wiring import build_services
@@ -48,6 +48,7 @@ def mcp_app(
     config: SearchConfig | None = None,
     extractor: Extractor | None = None,
     access: AccessService | None = None,
+    authenticator: Authenticator | None = None,
 ) -> McpHivemind:
     """The MCP tools over ``store`` as ``credential``, wired as the server wires them.
 
@@ -55,7 +56,9 @@ def mcp_app(
     ``now`` (a fixed one by default), and ``access`` replaces the access service when a test shares its own."""
     embedder = embedder or make_embedder()
     config = config or make_search_config()
-    services = build_services(store, embedder, config, extractor=extractor)
+    services = build_services(
+        store, embedder, config, extractor=extractor, authenticator=authenticator
+    )
     services = replace(
         services,
         search_service=SearchService(store, embedder, config, now_fn=clock or make_clock()),
@@ -312,7 +315,7 @@ class World:
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=create_app(self.app)), base_url="http://t"
         )
-        self.successions = self.app.access_service.successions
+        self.successions = self.app.succession_service
         self.blue = ""
         self.red = ""
 

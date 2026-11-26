@@ -13,7 +13,7 @@ from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState
 from hivemind.mcp.app import McpHivemind, hive_get, hive_list
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.governance import GovernanceService
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.read import ReadService
 from tests.builders import mcp_app
 from tests.fakes import (
@@ -53,7 +53,7 @@ async def _world() -> tuple[MemoryStore, Entry, Entry, Entry]:
 
 
 def _read(store: MemoryStore) -> ReadService:
-    return ReadService(store, GovernanceService(store), make_search_config())
+    return ReadService(store, FeedbackService(store), make_search_config())
 
 
 async def test_a_hidden_successor_is_dropped_on_single_batch_and_list_reads() -> None:

@@ -39,7 +39,9 @@ from hivemind.mcp.errors import (
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.drafts import entry_draft
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.governance import GovernanceService
+from hivemind.services.pins import PinService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchResult, SearchService
 from hivemind.services.wiring import Services
@@ -68,6 +70,8 @@ class McpHivemind:
     search_service: SearchService
     governance_service: GovernanceService
     access_service: AccessService
+    feedback_service: FeedbackService
+    pin_service: PinService
     credential: Credential
     # Called once per degraded search, so the HTTP runner can count them.
     on_degraded_search: Callable[[], None] | None = None
@@ -86,6 +90,8 @@ class McpHivemind:
             search_service=services.search_service,
             governance_service=services.governance_service,
             access_service=services.access_service,
+            feedback_service=services.feedback_service,
+            pin_service=services.pin_service,
             credential=credential,
             on_degraded_search=on_degraded_search,
         )
@@ -601,9 +607,9 @@ async def hive_pin(app: McpHivemind, entry_id: str, unpin: bool = False) -> dict
     fleet 10 (ADR 0096). An entry the caller may not read is ``not_found``."""
     try:
         if unpin:
-            removed = await app.governance_service.unpin(app.credential, entry_id)
+            removed = await app.pin_service.unpin(app.credential, entry_id)
             return {"entry_id": entry_id, "pinned": False, "removed": removed}
-        pin = await app.governance_service.pin(app.credential, entry_id)
+        pin = await app.pin_service.pin(app.credential, entry_id)
     except SERVICE_ERRORS as exc:
         return service_error_reply(exc)
     return {**wire.pin_dict(pin), "pinned": True}
@@ -619,7 +625,7 @@ async def hive_pinned(app: McpHivemind, fleet_id: str | None = None) -> dict[str
     acknowledges the change (ADR 0076). ``fleet_phase`` is there while your
     own fleet has a phase in force (ADR 0143)."""
     try:
-        pinned = await app.governance_service.pinned(app.credential, fleet_id)
+        pinned = await app.pin_service.pinned(app.credential, fleet_id)
         phase = await app.access_service.home_fleet_phase(app.credential, fleet_id)
     except SERVICE_ERRORS as exc:
         return service_error_reply(exc)
@@ -661,7 +667,7 @@ async def hive_feedback(
     if not isinstance(parsed_verdict, Verdict):
         return parsed_verdict
     try:
-        outcome = await app.governance_service.record_feedback(
+        outcome = await app.feedback_service.record_feedback(
             app.credential, entry_id, parsed_verdict, note, agent=agent
         )
     except SERVICE_ERRORS as exc:  # incl. PermissionDenied for the caller's own entry (ADR 0065)
@@ -700,7 +706,7 @@ async def _hive_feedback_many(
     if not isinstance(parsed_verdict, Verdict):
         return parsed_verdict
     try:
-        outcomes = await app.governance_service.record_feedback_many(
+        outcomes = await app.feedback_service.record_feedback_many(
             app.credential, entry_ids, parsed_verdict, note, agent=agent
         )
     except SERVICE_ERRORS as exc:  # incl. PermissionDenied for the caller's own entry (ADR 0065)

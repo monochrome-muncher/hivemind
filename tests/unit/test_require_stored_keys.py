@@ -136,9 +136,7 @@ async def test_build_services_propagates_the_flag() -> None:
         store, make_embedder(), make_search_config(), require_stored_keys=True
     )
     with pytest.raises(EntryNotFound):
-        await services.governance_service.record_feedback(
-            dev_credential(), entry_id, Verdict.HELPFUL
-        )
+        await services.feedback_service.record_feedback(dev_credential(), entry_id, Verdict.HELPFUL)
 
 
 # -- the surfaces: REST and MCP downgrade a dev credential before any service ---------
@@ -302,5 +300,5 @@ async def test_build_services_downgrades_pins_too() -> None:
         store, make_embedder(), make_search_config(), require_stored_keys=True
     )
     with pytest.raises(EntryNotFound):
-        await services.governance_service.pin(dev_credential(), fleet)
+        await services.pin_service.pin(dev_credential(), fleet)
     assert await store.list_pins(HOME_FLEET) == []

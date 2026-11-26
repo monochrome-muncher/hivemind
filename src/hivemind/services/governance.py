@@ -1,22 +1,9 @@
-"""Governance (SPEC.md §4.1, §8): withdrawal, restore, redaction and the move to `self`, plus the
-one service object the surfaces hold; import feedback, pin and write names from their own
-modules."""
+"""Governance (SPEC.md §4.1, §8): withdrawal, restore, redaction and the move to `self`."""
 
 from __future__ import annotations
 
-from datetime import timedelta
-
-from hivemind.config import SearchConfig
 from hivemind.domain.audit import AuditAction
 from hivemind.domain.entry import Entry, EntryState
-from hivemind.domain.feedback import (
-    FeedbackLogFilters,
-    FeedbackLogItem,
-    FeedbackSummary,
-    FlaggedEntry,
-    Verdict,
-)
-from hivemind.domain.pin import Pin, PinnedEntry
 from hivemind.domain.redaction import RedactOutcome
 from hivemind.domain.self_move import SelfMove
 from hivemind.domain.validation import MAX_REASON_CHARS, InvalidInput, check_text
@@ -24,23 +11,16 @@ from hivemind.ports import Credential, EntryNotActiveConflict, Store, UnknownEnt
 from hivemind.services.audit import audit_unpins, record_admin_action
 from hivemind.services.chain import get_visible_entry
 from hivemind.services.errors import EntryNotActive, EntryNotFound, PermissionDenied
-from hivemind.services.feedback import FeedbackOutcome, FeedbackService
 from hivemind.services.pins import PinService
 
 
 class GovernanceService:
-    """Withdrawal (SPEC.md §8.1): the author, a successor (ADR 0113) or an admin. Feedback and pin
-    calls are handed on to ``FeedbackService`` and ``PinService``."""
+    """Withdrawal (SPEC.md §8.1): the author, a successor (ADR 0113) or an admin. A withdrawal
+    unpins the entry through the ``PinService`` it is given."""
 
-    def __init__(
-        self,
-        store: Store,
-        config: SearchConfig | None = None,
-        require_stored_keys: bool = False,
-    ) -> None:
+    def __init__(self, store: Store, pins: PinService) -> None:
         self._store = store
-        self._feedback = FeedbackService(store, config, require_stored_keys=require_stored_keys)
-        self._pins = PinService(store, require_stored_keys=require_stored_keys)
+        self._pins = pins
 
     async def withdraw(
         self, credential: Credential, entry_id: str, reason: str | None = None
@@ -207,76 +187,3 @@ class GovernanceService:
             raise EntryNotFound(f"unknown entry: {entry.id}") from exc
         except EntryNotActiveConflict as exc:  # a concurrent withdraw won the race
             raise EntryNotActive(str(exc)) from exc
-
-    async def record_feedback(
-        self,
-        credential: Credential,
-        entry_id: str,
-        verdict: Verdict,
-        note: str | None = None,
-        agent: str | None = None,
-    ) -> FeedbackOutcome:
-        return await self._feedback.record_feedback(credential, entry_id, verdict, note, agent)
-
-    async def record_feedback_many(
-        self,
-        credential: Credential,
-        entry_ids: list[str],
-        verdict: Verdict,
-        note: str | None = None,
-        agent: str | None = None,
-    ) -> list[FeedbackOutcome]:
-        return await self._feedback.record_feedback_many(
-            credential, entry_ids, verdict, note, agent
-        )
-
-    async def feedback_summary(self, entry_id: str) -> FeedbackSummary:
-        return await self._feedback.feedback_summary(entry_id)
-
-    async def feedback_summaries(self, entry_ids: list[str]) -> dict[str, FeedbackSummary]:
-        return await self._feedback.feedback_summaries(entry_ids)
-
-    async def quality(self, entry_id: str) -> float:
-        return await self._feedback.quality(entry_id)
-
-    async def feedback_log(
-        self,
-        credential: Credential,
-        filters: FeedbackLogFilters,
-        *,
-        limit: int,
-        offset: int = 0,
-    ) -> list[FeedbackLogItem]:
-        return await self._feedback.feedback_log(credential, filters, limit=limit, offset=offset)
-
-    async def flag_backlog(
-        self,
-        credential: Credential,
-        *,
-        fleet_id: str | None = None,
-        older_than: timedelta | None = None,
-        orphaned: bool = False,
-        own: bool = False,
-        limit: int,
-        offset: int = 0,
-    ) -> list[FlaggedEntry]:
-        return await self._feedback.flag_backlog(
-            credential,
-            fleet_id=fleet_id,
-            older_than=older_than,
-            orphaned=orphaned,
-            own=own,
-            limit=limit,
-            offset=offset,
-        )
-
-    async def pin(self, credential: Credential, entry_id: str, via: str | None = None) -> Pin:
-        return await self._pins.pin(credential, entry_id, via)
-
-    async def unpin(self, credential: Credential, entry_id: str, via: str | None = None) -> bool:
-        return await self._pins.unpin(credential, entry_id, via)
-
-    async def pinned(
-        self, credential: Credential, fleet_id: str | None = None
-    ) -> list[PinnedEntry]:
-        return await self._pins.pinned(credential, fleet_id)

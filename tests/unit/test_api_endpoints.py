@@ -894,7 +894,7 @@ class TestAccessEndpoints:
             "alice", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=fa.id
         )
         admin = Credential(user_id="admin", is_admin=True)
-        await app.access_service.merges.merge(fb.id, admin, target_fleet_id=fa.id)
+        await app.merge_service.merge(fb.id, admin, target_fleet_id=fa.id)
         client = make_client(app)
         async with client:
             resp = await client.patch(

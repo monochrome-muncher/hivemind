@@ -32,6 +32,7 @@ from hivemind.ports import Credential
 from hivemind.services import fleet_merge as fleet_merge_module
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
+from hivemind.services.fleet_merge import FleetMergeService
 from tests.fakes import FakeAuthenticator, make_embedder, make_search_config
 
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
@@ -56,7 +57,7 @@ class World:
     def __init__(self) -> None:
         self.store = MemoryStore(TickingClock())
         self.access = AccessService(self.store)
-        self.merges = self.access.merges
+        self.merges = FleetMergeService(self.store)
 
     async def fleet(self, name: str) -> str:
         return (await self.store.create_fleet(name)).id
@@ -783,8 +784,8 @@ async def test_a_merge_and_an_undo_drop_the_cached_metrics_and_activity_scans() 
 
     assert await seen() == {"a": 2, "b": 0}
     assert services.activity_service._cache  # warm
-    out = await services.access_service.merges.merge(a, ADMIN, target_fleet_id=b)
+    out = await services.merge_service.merge(a, ADMIN, target_fleet_id=b)
     assert not services.activity_service._cache
     assert await seen() == {"b": 2}  # the one-hour TTL would otherwise serve the old split
-    await services.access_service.merges.undo(out.record.id, ADMIN)
+    await services.merge_service.undo(out.record.id, ADMIN)
     assert await seen() == {"a": 2, "b": 0}

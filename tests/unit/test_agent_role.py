@@ -19,7 +19,9 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import PermissionDenied
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.metrics import MetricsService
+from hivemind.services.successions import SuccessionService
 from tests.builders import mcp_app
 from tests.fakes import (
     FakeAuthenticator,
@@ -53,6 +55,8 @@ class World:
     def __init__(self) -> None:
         self.store = MemoryStore(make_clock())
         self.access = AccessService(self.store, FakeAuthenticator())
+        self.merges = FleetMergeService(self.store)
+        self.successions = SuccessionService(self.store, self.access.require_authenticator)
 
     async def agent(self, name: str = "alice", fleet: str = "platform") -> str:
         fleet_id = (await self.access.create_fleet(fleet, ADMIN)).id
@@ -159,13 +163,13 @@ async def test_a_role_survives_a_move_and_a_merge_but_a_successor_does_not_inher
     await world.store.activate_agent("bob", trust_level=TrustLevel.CONTRIBUTOR, home_fleet_id=red)
     await world.access.set_agent_role("alice", AgentRole.SCOUT, ADMIN)
 
-    await world.access.merges.move(blue, ["alice"], ADMIN, target_fleet_id=red)
+    await world.merges.move(blue, ["alice"], ADMIN, target_fleet_id=red)
     assert (await world.store.get_agent("alice")).role is AgentRole.SCOUT  # type: ignore[union-attr]
-    await world.access.merges.merge(red, ADMIN, target_fleet_id=blue)
+    await world.merges.merge(red, ADMIN, target_fleet_id=blue)
     assert (await world.store.get_agent("alice")).role is AgentRole.SCOUT  # type: ignore[union-attr]
     assert (await world.store.get_agent("bob")).role is None  # type: ignore[union-attr]
 
-    await world.access.successions.retire("alice", "bob", ADMIN)
+    await world.successions.retire("alice", "bob", ADMIN)
     retired = await world.store.get_agent("alice")
     successor = await world.store.get_agent("bob")
     assert retired is not None and successor is not None
