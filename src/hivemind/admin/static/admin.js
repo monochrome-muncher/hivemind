@@ -10,6 +10,7 @@
 //   memfilters.js the memory filters (state, tags, entity, dates)
 //   csv.js        CSV export of a list
 //   drawer.js     the memory detail drawer (configured below)
+//   cleanupblocks.js the preview blocks of the cleanup dialog
 //   charts.js     the SVG activity chart
 //   explain.js    "Explain ranking": a hit's score as plain lines
 //   since.js      "since you last looked" (last visit in browser storage)
@@ -50,7 +51,7 @@
 // sessionStorage for this tab only; a new key is shown once.
 
 import {
-  $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, parseHash, fleetName, memoriesHref, feedbackHref, agentHref,
+  $, h, api, hooks, hasKey, setKey, clearKey, closeModal, guarded, showLogin, showShell, parseHash, fleetName, memoriesHref, feedbackHref, agentHref,
 } from "./core.js";
 import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
 import { viewOverview } from "./overview.js";
@@ -105,20 +106,6 @@ async function route() {
     page.replaceChildren(h("div", { class: "card" }, h("div", { class: "card-body" },
       h("p", { class: "form-error", text: `Could not load this page: ${err.message}` }))));
   }
-}
-
-function showLogin(message) {
-  $("shell").hidden = true;
-  $("login").hidden = false;
-  const errorEl = $("login-error");
-  errorEl.textContent = message || "";
-  errorEl.hidden = !message;
-  $("login-key").focus();
-}
-
-function showShell() {
-  $("login").hidden = true;
-  $("shell").hidden = false;
 }
 
 function signOut(message) {

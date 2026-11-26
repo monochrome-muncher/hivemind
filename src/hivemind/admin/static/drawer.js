@@ -18,7 +18,7 @@
 // `self` (ADR 0145) needs moveToSelf, and canWithdraw decides who sees it.
 
 import {
-  $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge, chipButton,
+  $, h, toast, openModal, closeModal, fmtTime, fmtAgo, kindBadge, stateBadge, copyText, link, verdictBadge, chipButton, typedConfirm,
 } from "./ui.js";
 
 const config = {
@@ -279,15 +279,20 @@ function redactDialog(e) {
     id: "f-redact-reason", rows: "3", maxlength: "500", required: true,
     placeholder: "What did this memory hold? Do not repeat the secret here.",
   });
-  const typed = h("input", { id: "f-redact-confirm", autocomplete: "off", spellcheck: "false", placeholder: e.id });
+  const typed = typedConfirm({
+    id: "f-redact-confirm",
+    expected: e.id,
+    label: "Type the memory id to confirm",
+    message: "Type the memory id exactly to confirm.",
+    note: h("div", { class: "row tight" }, h("code", { text: e.id })),
+  });
   openModal({
     title: "Redact this memory?",
     body: [
       h("p", { class: "plain", text: "This wipes the summary, body, tags, sources, payload, extracted entities and links of this memory, and its embedding and keyword index. It cannot be undone and the text cannot be brought back." }),
       h("p", { class: "muted small", text: "The author, scope, fleet, dates, feedback and the audit log stay. Feedback notes written by agents and withdrawal reasons in the audit log are not edited: they may quote the text, and the confirmation says how many to review. Backups still hold the text until they age out." }),
       h("div", { class: "field" }, h("label", { for: "f-redact-reason", text: "Reason (kept in the audit log, so do not repeat the secret)" }), reason),
-      h("div", { class: "field" }, h("label", { for: "f-redact-confirm", text: "Type the memory id to confirm" }),
-        h("div", { class: "row tight" }, h("code", { text: e.id })), typed),
+      typed.field,
     ],
     actions: [
       { label: "Cancel" },
@@ -298,8 +303,8 @@ function redactDialog(e) {
         onClick: async () => {
           const text = reason.value.trim();
           if (!text) throw new Error("Say why it is being redacted: the reason is kept in the audit log.");
-          if (typed.value.trim() !== e.id) throw new Error("Type the memory id exactly to confirm.");
-          const done = await config.redactEntry(e.id, text, typed.value.trim());
+          typed.check();
+          const done = await config.redactEntry(e.id, text, e.id);
           if (!done) return;
           closeModal();
           const n = done.feedback_notes || 0;

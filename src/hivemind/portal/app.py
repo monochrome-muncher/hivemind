@@ -28,6 +28,7 @@ SHARED_MODULES = (
     "memfilters.js",
     "csv.js",
     "drawer.js",
+    "cleanupblocks.js",
     "charts.js",
     "explain.js",
     "since.js",

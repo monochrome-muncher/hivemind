@@ -16,13 +16,11 @@ from hivemind.api.routes.params import (
     IdQuery,
     require_admin_key,
 )
-from hivemind.api.routes.shared import (
-    to_utc,
-)
 from hivemind.api.schemas import (
     AuditRecordOut,
     KeyIssuedOut,
 )
+from hivemind.api.schemas.common import to_utc
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.validation import (
     InvalidInput,

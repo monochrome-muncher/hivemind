@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field
 
-from hivemind.domain.validation import MAX_ID_CHARS, check_no_nul
+from hivemind.domain.validation import MAX_ID_CHARS, as_utc, check_no_nul
 
 
 def _no_nul(value: str) -> str:
@@ -23,9 +23,7 @@ def to_utc(value: datetime | None) -> datetime | None:
     UTC-based; a bare timestamp is assumed UTC so downstream asyncpg
     ``timestamptz`` columns and the recency rescore never see a naive
     value)."""
-    if value is not None and value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value
+    return None if value is None else as_utc(value)
 
 
 class HealthOut(BaseModel):

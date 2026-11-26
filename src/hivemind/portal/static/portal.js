@@ -8,13 +8,13 @@
 //   cleanup.js  the clean-up page (ADR 0118)
 // and the admin panel's shared modules, served as they are (ADR 0091):
 //   ui.js client.js lists.js memfilters.js csv.js drawer.js charts.js
-//   explain.js since.js
+//   cleanupblocks.js explain.js since.js
 //
 // Rules every module keeps: API data reaches the page through textContent
 // (h()) and never through an HTML-parsing sink; the agent key lives in
 // sessionStorage for this tab only, in its own slot; one key at a time.
 
-import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, openModal, guarded, refusedMessage, parseHash, state, refusal, isMine, fleetName, levelName, viewHref, canPin, PIN_REMINDER } from "./session.js";
+import { $, h, api, hooks, hasKey, setKey, clearKey, closeModal, openModal, guarded, refusedMessage, showLogin, showShell, parseHash, state, refusal, isMine, fleetName, levelName, viewHref, canPin, PIN_REMINDER } from "./session.js";
 import { closeDrawer, configureDrawer, initDrawer } from "./drawer.js";
 import { viewMemories, viewAttention, viewGiven, viewReceived, viewFleet, viewSearch, viewHistory, viewRelied } from "./views.js";
 import { viewCleanup } from "./cleanup.js";
@@ -80,20 +80,6 @@ function paintWho() {
   $("who").replaceChildren(
     h("span", { class: "who-name", text: me.name }),
     h("span", { class: "muted small", text: `${levelName(me.trust_level)} · ${me.home_fleet_id ? fleetName(me.home_fleet_id) : "no home fleet"}` }));
-}
-
-function showLogin(message) {
-  $("shell").hidden = true;
-  $("login").hidden = false;
-  const errorEl = $("login-error");
-  errorEl.textContent = message || "";
-  errorEl.hidden = !message;
-  $("login-key").focus();
-}
-
-function showShell() {
-  $("login").hidden = true;
-  $("shell").hidden = false;
 }
 
 function signOut(message) {

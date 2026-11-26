@@ -7,74 +7,30 @@
 
 import {
   api, h, state, guarded, fleetName, pageHead, refreshButton, card, fill, table, toast,
-  openModal, closeModal, fmtAgo, fmtNum, fmtTime, kindBadge,
+  openModal, closeModal, fmtAgo, fmtTime, plural, localInputValue, typedConfirm,
 } from "./session.js";
-import { openEntry } from "./drawer.js";
+import { cleanupBlocks } from "./cleanupblocks.js";
 
-const pad = (n) => String(n).padStart(2, "0");
-/** A Date as the value of a datetime-local input (local time). */
-const localValue = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-const plural = (n, one, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
-
-const entryRow = (e) => h("li", {},
-  kindBadge(e.kind),
-  h("span", {},
-    h("a", { href: "#", class: "link", text: e.summary, onclick: (ev) => { ev.preventDefault(); openEntry(e.id, () => {}); } }), " ",
-    h("span", { class: "muted small", text: `${e.author} · ${e.scope}${e.fleet_id ? ` · ${fleetName(e.fleet_id)}` : ""} · written ${fmtAgo(e.created_at)}` })));
-
-function withdrawBlock(preview) {
-  return h("div", { class: "field" },
-    h("label", { text: `Memories to withdraw (${fmtNum(preview.withdraw_total)})` }),
-    h("span", { class: "hint", text: "Active memories written in the window, in any scope, by this agent or by agents retired in its favour. They are withdrawn as a cleanup and taken off any fleet briefing. An undo puts them back." }),
-    preview.withdraw.length
-      ? h("div", { class: "modal-scroll cleanup-list" }, h("ul", { class: "merge-list" }, preview.withdraw.map(entryRow)))
-      : h("span", { class: "muted small", text: "None." }),
-    preview.withdraw_truncated
-      ? h("span", { class: "hint", text: `Showing the newest ${fmtNum(preview.withdraw.length)}. All ${fmtNum(preview.withdraw_total)} are withdrawn.` })
-      : null,
-    preview.pins_total ? h("span", { class: "hint", text: `${plural(preview.pins_total, "pin")} on these memories will be removed.` }) : null);
-}
-
-function ratingsBlock(preview) {
-  const parts = Object.entries(preview.ratings_by_verdict).map(([v, n]) => `${fmtNum(n)} ${v}`);
-  return h("div", { class: "field" },
-    h("label", { text: `Verdicts to set aside (${fmtNum(preview.ratings_total)})` }),
-    h("span", { class: "hint", text: "The helpful, stale and wrong verdicts this agent last gave in the window stop counting towards rankings and flags. The rows are kept, and giving a verdict on the same memory again brings one back." }),
-    preview.ratings_total ? h("span", { class: "small", text: parts.join(", ") }) : h("span", { class: "muted small", text: "None." }));
-}
-
-/** The restorable memories, each ticked by default. */
-function restoreBlock(preview) {
-  const boxes = preview.restorable.map((e) => ({ e, box: h("input", { type: "checkbox", value: e.id, checked: true }) }));
-  const count = h("strong");
-  const sync = () => { count.textContent = `${boxes.filter((b) => b.box.checked).length} of ${fmtNum(preview.restorable_total)}`; };
-  for (const b of boxes) b.box.addEventListener("change", sync);
-  sync();
-  const items = boxes.map(({ e, box }) => h("li", {},
-    h("label", { class: "check" }, box,
-      h("span", {}, h("strong", { text: e.summary }), " ",
-        h("span", { class: "muted small", text: `${e.author} · ${e.scope} · written ${fmtAgo(e.created_at)}` })))));
-  return {
-    el: h("div", { class: "field" },
-      h("label", {}, "Older memories to bring back: ", count),
-      h("span", { class: "hint", text: "Memories that these memories replaced, including through a chain of replacements, and that nobody has replaced since. A ticked one becomes active again. An undo replaces it again." }),
-      boxes.length ? h("div", { class: "modal-scroll cleanup-list" }, h("ul", { class: "merge-list" }, items)) : h("span", { class: "muted small", text: "None." }),
-      preview.restorable_truncated
-        ? h("span", { class: "hint", text: `Showing the newest ${fmtNum(boxes.length)} of ${fmtNum(preview.restorable_total)}; the others stay superseded.` })
-        : null),
-    chosen: () => boxes.filter((b) => b.box.checked).map((b) => b.e.id),
-  };
-}
+const { withdrawBlock, ratingsBlock, restoreBlock } = cleanupBlocks({
+  fleetName,
+  words: {
+    withdrawHint: "Active memories written in the window, in any scope, by this agent or by agents retired in its favour. They are withdrawn as a cleanup and taken off any fleet briefing. An undo puts them back.",
+    ratingsLabel: "Verdicts to set aside",
+    ratingsHint: "The helpful, stale and wrong verdicts this agent last gave in the window stop counting towards rankings and flags. The rows are kept, and giving a verdict on the same memory again brings one back.",
+    restoreLabel: "Older memories to bring back",
+    restoreHint: "Memories that these memories replaced, including through a chain of replacements, and that nobody has replaced since. A ticked one becomes active again. An undo replaces it again.",
+  },
+});
 
 /** Ask for the agent's name, then apply the previewed cleanup. */
 function confirmDialog(me, preview, restore, onDone) {
-  const confirm = h("input", { id: "cl-confirm", autocomplete: "off", placeholder: me.name, "aria-label": `Type ${me.name} to confirm` });
+  const confirm = typedConfirm({ id: "cl-confirm", expected: me.name });
   const ids = restore.chosen();
   openModal({
     title: `Clean up ${me.name}'s work?`,
     body: [
       h("p", {}, `${plural(preview.withdraw_total, "memory", "memories")} will be withdrawn, ${plural(preview.ratings_total, "verdict")} set aside and ${plural(ids.length, "older memory", "older memories")} brought back. Nothing is deleted, and you can undo it from this page.`),
-      h("div", { class: "field" }, h("label", { for: "cl-confirm", text: `Type “${me.name}” to confirm` }), confirm),
+      confirm.field,
     ],
     actions: [
       { label: "Cancel", class: "btn-ghost" },
@@ -83,7 +39,7 @@ function confirmDialog(me, preview, restore, onDone) {
         class: "btn-danger-solid",
         submit: true,
         onClick: async () => {
-          if (confirm.value.trim() !== me.name) throw new Error(`Type “${me.name}” to confirm.`);
+          confirm.check();
           const body = {
             since: preview.since,
             until: preview.until,
@@ -151,7 +107,7 @@ function cleanupsCard(cleanups, onChange) {
 
 export async function viewCleanup(root) {
   const me = state.me;
-  const since = h("input", { type: "datetime-local", id: "cl-since", value: localValue(new Date(Date.now() - 24 * 3600 * 1000)) });
+  const since = h("input", { type: "datetime-local", id: "cl-since", value: localInputValue(new Date(Date.now() - 24 * 3600 * 1000)) });
   const until = h("input", { type: "datetime-local", id: "cl-until", title: "Leave empty for now" });
   const previewButton = h("button", { type: "button", class: "btn btn-sm", text: "Preview" });
   const applyButton = h("button", { type: "button", class: "btn btn-danger-solid", text: "Clean up…", hidden: true });
