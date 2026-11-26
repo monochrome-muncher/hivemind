@@ -442,7 +442,8 @@ export async function viewAgents(root) {
             a.idle ? [" ", h("span", { class: "badge badge-pending", title: `No request for ${idleDays}+ days`, text: "idle" })] : null),
           agentActions(a, refresh));
       }),
-      state.agents.length ? "No agents match the filter." : "No agents have registered yet."));
+      state.agents.length ? "No agents match the filter." : "No agents have registered yet.",
+      { className: "agents-table" }));
   };
   search.addEventListener("input", render);
   statusFilter.addEventListener("change", () => { render(); syncHash(); });

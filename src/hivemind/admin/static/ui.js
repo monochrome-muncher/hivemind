@@ -335,7 +335,9 @@ export function pageHead(title, subtitle, ...extra) {
 
 export function card(title, body, { head = [], className = "", flush = false } = {}) {
   return h("div", { class: `card ${className}`.trim() },
-    title || head.length ? h("div", { class: "card-head" }, title ? h("h2", { text: title }) : null, ...head) : null,
+    title || head.length ? h("div", { class: "card-head" },
+      title ? h("h2", { text: title }) : null,
+      head.length ? h("div", { class: "card-tools" }, ...head) : null) : null,
     flush ? body : h("div", { class: "card-body" }, body));
 }
 

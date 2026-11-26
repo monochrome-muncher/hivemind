@@ -9,6 +9,7 @@
 .status-card .stat-value { font-size: 18px; }
 
 /* The fleet activity chart on the portal home (ADR 0165): one line per agent. */
+.chart-figure > svg.chart { width: 100%; height: auto; }
 .line-series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart-cross { stroke: var(--muted); stroke-width: 1; }
 .chart-marker { stroke: var(--surface); stroke-width: 2; }
