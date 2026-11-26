@@ -385,3 +385,16 @@ def test_resolve_legacy_writes_any_scope() -> None:
     assert resolve_write_scope(legacy_credential()).scope == "org"
     assert resolve_write_scope(legacy_credential(), requested_scope="self").scope == "self"
     assert resolve_write_scope(legacy_credential(), requested_scope="fleet").scope == "fleet"
+
+
+def test_resolve_unknown_scope_is_invalid_input_before_any_permission_check() -> None:
+    for credential in (agent_credential(TrustLevel.UNTRUSTED), agent_credential(TrustLevel.LURKER)):
+        with pytest.raises(
+            InvalidInput, match="scope must be 'self', 'fleet' or 'org', got 'team'"
+        ):
+            resolve_write_scope(credential, requested_scope="team")
+
+
+def test_resolve_scope_is_normalised() -> None:
+    res = resolve_write_scope(legacy_credential(), requested_scope=" Fleet ")
+    assert res.scope == "fleet"

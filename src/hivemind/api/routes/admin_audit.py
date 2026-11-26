@@ -9,13 +9,11 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from hivemind.api.routes.params import API_PREFIX, ActorQuery, AppDep, CredentialDep, IdQuery
-from hivemind.api.routes.shared import (
-    to_utc,
-)
 from hivemind.api.schemas import (
     AuditRecordOut,
     KeyIssuedOut,
 )
+from hivemind.api.schemas.common import to_utc
 from hivemind.domain.audit import AuditAction, AuditFilters
 from hivemind.domain.validation import (
     InvalidInput,

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
-from hivemind.domain.validation import InvalidInput
+from hivemind.domain.validation import InvalidInput, as_utc
 
 MAX_PHASE_DAYS = 30
 # A caller's clock may run a little ahead of the server's.
@@ -51,7 +51,7 @@ class FleetPhase:
     def starting(cls, kind: PhaseName, until: datetime, now: datetime) -> FleetPhase:
         """A phase beginning ``now``; ``InvalidInput`` unless ``until`` is later than ``now`` and
         at most ``MAX_PHASE_DAYS`` days ahead (plus a minute of clock grace). A naive ``until`` means UTC."""
-        until = until.replace(tzinfo=UTC) if until.tzinfo is None else until.astimezone(UTC)
+        until = as_utc(until).astimezone(UTC)
         if until <= now:
             raise InvalidInput("until must be in the future")
         if until > now + timedelta(days=MAX_PHASE_DAYS) + CLOCK_GRACE:

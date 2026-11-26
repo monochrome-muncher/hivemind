@@ -29,7 +29,7 @@ import asyncpg
 
 from hivemind.config import load_settings
 from hivemind.domain.entry import EntryDraft, ExtractedEntity, Kind
-from hivemind.domain.validation import is_valid_uuid
+from hivemind.domain.validation import as_utc, is_valid_uuid
 from hivemind.extractor import OpenAICompatExtractor
 from hivemind.ports import Extractor
 from hivemind.store.pgstore.rows import decode_entities, encode_entities
@@ -279,7 +279,7 @@ def _timestamp(value: str) -> datetime:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"not an ISO 8601 date or time: {value!r}") from None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return as_utc(parsed)
 
 
 def _entry_id(value: str) -> str:
