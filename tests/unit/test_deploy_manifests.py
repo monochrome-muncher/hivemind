@@ -871,11 +871,25 @@ def test_grafana_dashboard_ships_with_the_monitoring_tree() -> None:
     exprs = [t["expr"] for p in dashboard["panels"] for t in p.get("targets", [])]
     assert exprs
     # One installation at a time: the pool-wide gauges are read with max(), so
-    # an "All" choice would show whichever namespace has the larger value.
-    (ns,) = [v for v in dashboard["templating"]["list"] if v["name"] == "namespace"]
-    assert ns["includeAll"] is False and ns["multi"] is False and "allValue" not in ns
-    # Every query is scoped by the namespace variable and reads a Hivemind series.
-    assert all('namespace=~"$namespace"' in e and "hivemind_" in e for e in exprs)
+    # an "All" choice would show whichever namespace has the larger value. The
+    # MCP runner may live in its own namespace, so it has its own choice.
+    variables = {v["name"]: v for v in dashboard["templating"]["list"]}
+    for name in ("namespace", "mcp_namespace"):
+        variable = variables[name]
+        assert variable["includeAll"] is False and variable["multi"] is False
+        assert "allValue" not in variable
+    assert "hivemind_usage_report_success" in variables["namespace"]["definition"]
+    assert "hivemind_mcp_tool_calls_total" in variables["mcp_namespace"]["definition"]
+    # Every query reads a Hivemind series in the chosen namespaces: MCP-only series in the MCP
+    # namespace, series both runners serve in either.
+    assert all("hivemind_" in e for e in exprs)
+    for e in exprs:
+        if "hivemind_mcp_" in e:
+            assert 'namespace=~"$mcp_namespace"' in e
+        elif "hivemind_http_" in e or "hivemind_search_degraded" in e:
+            assert 'namespace=~"$namespace|$mcp_namespace"' in e
+        else:
+            assert 'namespace=~"$namespace"' in e
     # The tool panels split server failures from refusals by the same codes the runner names.
     failures = "|".join(sorted(FAILURE_CODES))
     tool_exprs = [e for e in exprs if 'outcome="error"' in e or "code=~" in e]

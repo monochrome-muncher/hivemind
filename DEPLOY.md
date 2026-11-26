@@ -922,6 +922,15 @@ and pick the Prometheus data source. The search panels smooth over the
 every 30 s. The MCP panels stay empty while `HIVEMIND_MCP_METRICS_ENABLED`
 is off. (ADR 0142)
 
+The dashboard shows one installation at a time. Pick its `hivemind-api`
+namespace under "API namespace" and its `hivemind-mcp` namespace under "MCP
+namespace". In the standard install both are the same and both default to
+it. If the two runners run in separate namespaces, such as
+`hivemind-api-production` and `hivemind-mcp-production`, pick the matching
+pair so production and staging never mix. The MCP tools panels read the MCP
+namespace; the traffic and keyword-only panels read both, one line per
+runner.
+
 ### Alerts
 
 The same tree ships `alerts.yaml`, a `PrometheusRule` named

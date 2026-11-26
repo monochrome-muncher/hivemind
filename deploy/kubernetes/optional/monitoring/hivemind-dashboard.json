@@ -58,9 +58,9 @@
       },
       {
         "name": "namespace",
-        "label": "Namespace",
+        "label": "API namespace",
         "type": "query",
-        "description": "One Hivemind installation at a time: the pool-wide gauges are the same on every replica and are read with max(), so mixing installations would show the larger one's value.",
+        "description": "The namespace of hivemind-api, one installation at a time: the pool-wide gauges are the same on every replica and are read with max(), so mixing installations would show the larger one's value.",
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
@@ -73,6 +73,27 @@
         "includeAll": false,
         "multi": false,
         "refresh": 2,
+        "current": {},
+        "sort": 1
+      },
+      {
+        "name": "mcp_namespace",
+        "label": "MCP namespace",
+        "type": "query",
+        "description": "The namespace of hivemind-mcp, for the MCP tools panels. The same as the API namespace in a standard install; pick the matching one when the two runners live in separate namespaces.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(hivemind_mcp_tool_calls_total, namespace)",
+          "refId": "mcp_ns"
+        },
+        "definition": "label_values(hivemind_mcp_tool_calls_total, namespace)",
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1,
         "current": {}
       }
     ]
@@ -251,7 +272,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (job) (rate(hivemind_search_degraded_total{namespace=~\"$namespace\"}[$__rate_interval])) * 60",
+          "expr": "sum by (job) (rate(hivemind_search_degraded_total{namespace=~\"$namespace|$mcp_namespace\"}[$__rate_interval])) * 60",
           "legendFormat": "{{job}}",
           "refId": "A"
         }
@@ -403,7 +424,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (job, status) (rate(hivemind_http_requests_total{namespace=~\"$namespace\"}[$__rate_interval]))",
+          "expr": "sum by (job, status) (rate(hivemind_http_requests_total{namespace=~\"$namespace|$mcp_namespace\"}[$__rate_interval]))",
           "legendFormat": "{{job}} {{status}}",
           "refId": "A"
         }
@@ -446,7 +467,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace\",status=~\"5..\"}[$__rate_interval])) or 0 * sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace|$mcp_namespace\",status=~\"5..\"}[$__rate_interval])) or 0 * sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace|$mcp_namespace\"}[$__rate_interval]))) / sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace|$mcp_namespace\"}[$__rate_interval]))",
           "legendFormat": "{{job}}",
           "refId": "A"
         }
@@ -488,7 +509,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "60 * (sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace\",status=\"401\"}[$__rate_interval])) or 0 * sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace\"}[$__rate_interval])))",
+          "expr": "60 * (sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace|$mcp_namespace\",status=\"401\"}[$__rate_interval])) or 0 * sum by (job) (rate(hivemind_http_requests_total{namespace=~\"$namespace|$mcp_namespace\"}[$__rate_interval])))",
           "legendFormat": "{{job}}",
           "refId": "A"
         }
@@ -530,7 +551,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, job, route) (rate(hivemind_http_request_duration_seconds_bucket{namespace=~\"$namespace\",route!=\"/metrics\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, job, route) (rate(hivemind_http_request_duration_seconds_bucket{namespace=~\"$namespace|$mcp_namespace\",route!=\"/metrics\"}[$__rate_interval])))",
           "legendFormat": "{{job}} {{route}}",
           "refId": "A"
         }
@@ -572,7 +593,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, job, route) (rate(hivemind_http_request_duration_seconds_bucket{namespace=~\"$namespace\",route!=\"/metrics\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, job, route) (rate(hivemind_http_request_duration_seconds_bucket{namespace=~\"$namespace|$mcp_namespace\",route!=\"/metrics\"}[$__rate_interval])))",
           "legendFormat": "{{job}} {{route}}",
           "refId": "A"
         }
@@ -627,7 +648,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "60 * sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))",
+          "expr": "60 * sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$mcp_namespace\"}[$__rate_interval]))",
           "legendFormat": "{{tool}}",
           "refId": "A"
         }
@@ -670,7 +691,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\",code=~\"embedding_unavailable|raised|store_unavailable\"}[$__rate_interval])) or 0 * sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))) / sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$mcp_namespace\",code=~\"embedding_unavailable|raised|store_unavailable\"}[$__rate_interval])) or 0 * sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$mcp_namespace\"}[$__rate_interval]))) / sum by (tool) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$mcp_namespace\"}[$__rate_interval]))",
           "legendFormat": "{{tool}}",
           "refId": "A"
         }
@@ -712,7 +733,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(hivemind_mcp_tool_duration_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(hivemind_mcp_tool_duration_seconds_bucket{namespace=~\"$mcp_namespace\"}[$__rate_interval])))",
           "legendFormat": "{{tool}}",
           "refId": "A"
         }
@@ -755,7 +776,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "60 * sum by (tool, code) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$namespace\",outcome=\"error\",code!~\"embedding_unavailable|raised|store_unavailable\"}[$__rate_interval]))",
+          "expr": "60 * sum by (tool, code) (rate(hivemind_mcp_tool_calls_total{namespace=~\"$mcp_namespace\",outcome=\"error\",code!~\"embedding_unavailable|raised|store_unavailable\"}[$__rate_interval]))",
           "legendFormat": "{{tool}} {{code}}",
           "refId": "A"
         }
