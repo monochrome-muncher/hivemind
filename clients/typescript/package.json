@@ -1,6 +1,6 @@
 {
   "name": "hivemind-memory",
-  "version": "2.32.2",
+  "version": "2.32.3",
   "description": "Client for Hivemind, the shared memory service for AI agents: MCP tools, instructions and tool definitions for agents built outside the supported harnesses.",
   "license": "MIT",
   "keywords": [
