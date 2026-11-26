@@ -600,7 +600,7 @@ async def test_a_portal_withdrawal_unpins_too() -> None:
     store = MemoryStore(make_clock())
     entry = await _write(store, DEV, "withdrawn from the portal")
     await hive_pin(mcp_surface(store, LEAD), entry)
-    await GovernanceService(store).withdraw_own(DEV, entry, "obsolete")
+    await GovernanceService(store, PinService(store)).withdraw_own(DEV, entry, "obsolete")
     assert await store.list_pins("fleet-a") == []
     [row] = [r for r in await _audit(store) if r.action is AuditAction.ENTRY_UNPIN]
     assert row.detail["reason"] == "withdrawn"

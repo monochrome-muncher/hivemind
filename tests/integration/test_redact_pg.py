@@ -30,6 +30,7 @@ from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.redaction import RedactRefused
 from hivemind.ports import Credential
 from hivemind.services.governance import GovernanceService
+from hivemind.services.pins import PinService
 from hivemind.store import PgStore
 
 SINCE = datetime(2020, 1, 1, tzinfo=UTC)
@@ -110,7 +111,7 @@ async def test_the_text_is_gone_from_every_table_and_column(pool) -> None:
     before = await _everywhere(dsn)
     assert SECRET in before["entries"] and "entry_links" in before
 
-    service = GovernanceService(store)
+    service = GovernanceService(store, PinService(store))
     out = await service.redact(ADMIN, entry.id, "a credential leaked", entry.id)
     assert (out.feedback_notes, out.flag_notes) == (1, 1)
 
@@ -178,7 +179,9 @@ async def test_a_superseded_copy_loses_its_text_everywhere(pool) -> None:
     )
     await store.record_feedback(Feedback(old.id, "bob", "b", Verdict.STALE, f"old {SECRET}"))
 
-    out = await GovernanceService(store).redact(ADMIN, old.id, "a credential leaked", old.id)
+    out = await GovernanceService(store, PinService(store)).redact(
+        ADMIN, old.id, "a credential leaked", old.id
+    )
     assert (out.feedback_notes, out.flag_notes) == (1, 1)
 
     after = await _everywhere(dsn)

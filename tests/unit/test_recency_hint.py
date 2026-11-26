@@ -23,12 +23,8 @@ from hivemind.mcp.app import McpHivemind, hive_search
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.retrieval.scoring import entry_score
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config
+from tests.fakes import FIXED_NOW, make_clock, make_embedder, make_search_config, mcp_surface
 from tests.unit.test_api_endpoints import make_authenticator, make_hivemind_app, post_entry
 
 NOW = FIXED_NOW
@@ -442,15 +438,12 @@ async def test_rest_setting_on_names_the_applied_hint_in_a_header() -> None:
 def _mcp(enabled: bool, store: MemoryStore) -> McpHivemind:
     embedder = make_embedder()
     config = replace(make_search_config(), recency_hint_enabled=enabled)
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=lambda: NOW),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=Credential(user_id="alice", agent_id="agent-1"),
+    return mcp_surface(
+        store,
+        Credential(user_id="alice", agent_id="agent-1"),
+        embedder=embedder,
+        config=config,
+        clock=lambda: NOW,
     )
 
 

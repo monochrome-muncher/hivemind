@@ -12,6 +12,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import NameTaken, PermissionDenied
+from hivemind.services.successions import SuccessionService
 from tests.fakes import FakeAuthenticator, make_clock, make_store_client
 
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
@@ -25,6 +26,7 @@ class World:
     def __init__(self) -> None:
         self.store = MemoryStore(make_clock())
         self.access = AccessService(self.store, FakeAuthenticator(store=self.store))
+        self.successions = SuccessionService(self.store, self.access.require_authenticator)
         self.fleet = ""
 
     async def agent(self, name: str, *, active: bool = True) -> None:
@@ -69,7 +71,7 @@ async def test_a_retired_agent_may_be_renamed() -> None:
     world = World()
     await world.agent("alice")
     await world.agent("bob")
-    await world.access.successions.retire("alice", "bob", ADMIN)
+    await world.successions.retire("alice", "bob", ADMIN)
     await world.access.rename_agent("alice", "alice-old", ADMIN)
     await world.access.rename_agent("bob", "robert", ADMIN)
     assert await world.store.inherited_authors("robert") == ("alice-old",)

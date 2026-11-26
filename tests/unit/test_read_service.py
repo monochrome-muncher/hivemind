@@ -16,6 +16,7 @@ from hivemind.domain.entry import EntryDraft, EntryFilters, Kind
 from hivemind.domain.feedback import Feedback, Verdict
 from hivemind.domain.validation import MAX_GET_IDS, InvalidInput
 from hivemind.ports import Credential
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.read import EntryDetail, ReadService
 from hivemind.services.write import WriteService
 from tests.fakes import agent_credential, make_embedder, make_search_config, make_store
@@ -49,8 +50,8 @@ async def _write(
     return written.entry.id
 
 
-def _service(store, governance) -> ReadService:
-    return ReadService(store, governance, make_search_config())
+def _service(store, feedback) -> ReadService:
+    return ReadService(store, feedback, make_search_config())
 
 
 # -- entry() ----------------------------------------------------------------
@@ -74,9 +75,8 @@ async def test_entry_carries_feedback_and_links() -> None:
     entry_id = await _write(store, WRITER)
     pointer_id = await _write(store, WRITER, see_also=(entry_id,))
     await store.record_feedback(Feedback(entry_id, "bob", "b", Verdict.HELPFUL, "worked for me"))
-    from hivemind.services.governance import GovernanceService
 
-    service = _service(store, GovernanceService(store))
+    service = _service(store, FeedbackService(store))
     detail = await service.entry(entry_id, visibility=ADMIN.visibility())
     assert isinstance(detail, EntryDetail)
     assert detail.entry.id == entry_id
@@ -93,11 +93,10 @@ async def test_entry_carries_feedback_and_links() -> None:
 
 async def test_entry_history_fills_the_chain() -> None:
     store = make_store()
-    from hivemind.services.governance import GovernanceService
 
     v1 = await _write(store, WRITER, summary="v1")
     v2 = await _write(store, WRITER, summary="v2", supersedes=(v1,))
-    service = _service(store, GovernanceService(store))
+    service = _service(store, FeedbackService(store))
     detail = await service.entry(v1, visibility=ADMIN.visibility(), include_history=True)
     assert [e.id for e in detail.successors] == [v2]
     assert detail.superseded == ()
@@ -108,11 +107,10 @@ async def test_entry_history_fills_the_chain() -> None:
 
 async def test_entries_returns_found_in_order_and_not_found() -> None:
     store = make_store()
-    from hivemind.services.governance import GovernanceService
 
     a = await _write(store, WRITER, summary="a")
     b = await _write(store, WRITER, summary="b")
-    service = _service(store, GovernanceService(store))
+    service = _service(store, FeedbackService(store))
     batch = await service.entries([b, a, "missing"], visibility=ADMIN.visibility())
     assert [d.entry.id for d in batch.entries] == [b, a]
     assert batch.not_found == ("missing",)
@@ -120,10 +118,9 @@ async def test_entries_returns_found_in_order_and_not_found() -> None:
 
 async def test_entries_dedupes() -> None:
     store = make_store()
-    from hivemind.services.governance import GovernanceService
 
     a = await _write(store, WRITER)
-    service = _service(store, GovernanceService(store))
+    service = _service(store, FeedbackService(store))
     batch = await service.entries([a, a], visibility=ADMIN.visibility())
     assert [d.entry.id for d in batch.entries] == [a]
     assert batch.not_found == ()
@@ -139,10 +136,9 @@ async def test_entries_rejects_empty_and_over_cap(ids: list[str]) -> None:
 
 async def test_entries_hides_invisible_entries_in_not_found() -> None:
     store = make_store()
-    from hivemind.services.governance import GovernanceService
 
     entry_id = await _write(store, WRITER)
-    service = _service(store, GovernanceService(store))
+    service = _service(store, FeedbackService(store))
     batch = await service.entries([entry_id], visibility=OUTSIDER.visibility())
     assert batch.entries == ()
     assert batch.not_found == (entry_id,)

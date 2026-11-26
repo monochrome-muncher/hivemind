@@ -19,12 +19,7 @@ from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.mcp.server import build_server, compact_schema
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
-from tests.fakes import make_clock, make_embedder, make_search_config
+from tests.fakes import make_clock, make_embedder, make_search_config, mcp_surface
 
 EXPECTED_TOOLS = [
     "hive_write",
@@ -46,15 +41,12 @@ def make_app() -> McpHivemind:
     store = MemoryStore(clock)
     embedder = make_embedder()
     config = make_search_config()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=Credential(user_id="dev", agent_id="hivemind-mcp"),
+    return mcp_surface(
+        store,
+        Credential(user_id="dev", agent_id="hivemind-mcp"),
+        embedder=embedder,
+        config=config,
+        clock=clock,
     )
 
 
@@ -160,16 +152,7 @@ async def _l2_app() -> tuple[McpHivemind, str]:
         trust_level=TrustLevel.CONTRIBUTOR,
         home_fleet_id=fleet.id,
     )
-    app = McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=cred,
-    )
+    app = mcp_surface(store, cred, embedder=embedder, config=config, clock=clock)
     return app, fleet.id
 
 

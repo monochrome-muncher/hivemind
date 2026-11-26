@@ -158,12 +158,12 @@ async def run_search(
 async def pin_entry(
     app: HivemindApp, credential: Credential, entry_id: str, via: str | None = None
 ) -> PinOut:
-    pin = await app.governance_service.pin(credential, entry_id, via)
+    pin = await app.pin_service.pin(credential, entry_id, via)
     return PinOut.from_pin(pin)
 
 
 async def unpin_entry(
     app: HivemindApp, credential: Credential, entry_id: str, via: str | None = None
 ) -> UnpinOut:
-    removed = await app.governance_service.unpin(credential, entry_id, via)
+    removed = await app.pin_service.unpin(credential, entry_id, via)
     return UnpinOut(entry_id=entry_id, removed=removed)

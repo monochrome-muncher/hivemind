@@ -17,6 +17,7 @@ from hivemind.domain.entry import EntryDraft, Kind
 from hivemind.domain.fleet_merge import FleetMergeRefused
 from hivemind.mcp.app import hive_get, hive_list, hive_whoami, hive_write
 from hivemind.services.access import AccessService
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.store.keys import _issue_admin
 from hivemind.store.pgstore import fleet_guards
 from hivemind.store.pgstore import fleet_merge as fleet_merge_sql
@@ -143,6 +144,7 @@ async def test_agents_read_their_old_fleet_with_the_same_key_after_the_merge(poo
     admin = await auth.verify(await _issue_admin(dsn, actor="test"))
     assert admin is not None
     access = AccessService(store, auth)
+    merges = FleetMergeService(store)
     a, b = await access.create_fleet("alpha", admin), await access.create_fleet("beta", admin)
     keys: dict[str, str] = {}
     for name, fleet in (("amy", a), ("bo", b)):
@@ -155,7 +157,7 @@ async def test_agents_read_their_old_fleet_with_the_same_key_after_the_merge(poo
     assert bo is not None
     await hive_write(pg_surface(store, bo), kind="fact", summary="beta knowledge")
 
-    await access.merges.merge(a.id, admin, target_fleet_id=b.id)
+    await merges.merge(a.id, admin, target_fleet_id=b.id)
 
     amy_again = await auth.verify(keys["amy"])  # the same key, no credential cache
     assert amy_again is not None and amy_again.home_fleet_id == b.id
@@ -174,6 +176,7 @@ async def test_undo_after_post_merge_writes_and_the_chained_refusal(pool) -> Non
     admin = await auth.verify(await _issue_admin(dsn, actor="test"))
     assert admin is not None
     access = AccessService(store, auth)
+    merges = FleetMergeService(store)
     a, b = await access.create_fleet("alpha", admin), await access.create_fleet("beta", admin)
     await store.register_agent("amy")
     await access.activate("amy", TrustLevel.CONTRIBUTOR, a.id, admin)
@@ -182,20 +185,20 @@ async def test_undo_after_post_merge_writes_and_the_chained_refusal(pool) -> Non
     await store.pin_entry(a.id, pinned.id, "amy", 10)
     theirs = await store.create_entry(fleet_draft(b.id, "from beta", "bo"), None)
 
-    first = await access.merges.merge(a.id, admin, target_fleet_id=b.id)
+    first = await merges.merge(a.id, admin, target_fleet_id=b.id)
     late = await store.create_entry(fleet_draft(b.id, "written after"), None)
-    chained = await access.merges.merge(b.id, admin, new_fleet_name="gamma")
+    chained = await merges.merge(b.id, admin, new_fleet_name="gamma")
     with pytest.raises(FleetMergeRefused):
-        await access.merges.undo(first.record.id, admin)  # beta is merged since
-    await access.merges.undo(chained.record.id, admin)
+        await merges.undo(first.record.id, admin)  # beta is merged since
+    await merges.undo(chained.record.id, admin)
 
-    undone = await access.merges.undo(first.record.id, admin)
+    undone = await merges.undo(first.record.id, admin)
     assert undone.entries_restored == 2 and undone.agents_restored == ("amy",)
     homes = {e.id: (await store.get_entry(e.id)).fleet_id for e in (mine, pinned, theirs, late)}  # type: ignore[union-attr]
     assert homes == {mine.id: a.id, pinned.id: a.id, theirs.id: b.id, late.id: b.id}
     assert [p.entry_id for p in await store.list_pins(a.id)] == [pinned.id]
     assert (await store.get_agent("amy")).home_fleet_id == a.id  # type: ignore[union-attr]
-    listing = await access.merges.list_merges(admin)
+    listing = await merges.list_merges(admin)
     assert len(listing) == 2 and not any(v.undoable for v in listing)  # both are undone
     audits = {r.action.value for r in await store.list_audit(AuditFilters(), 100)}
     assert {"fleet.merge", "fleet.unmerge", "fleet.create"} <= audits

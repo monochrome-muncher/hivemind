@@ -13,7 +13,7 @@ from hivemind.domain.feedback import Verdict
 from hivemind.mcp.app import hive_feedback, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.governance import GovernanceService
+from hivemind.services.feedback import FeedbackService
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
@@ -115,7 +115,7 @@ async def test_batch_with_nothing_fixable_has_no_fix_field() -> None:
 async def test_the_service_outcome_carries_the_flag() -> None:
     store = MemoryStore()
     eid = await _fleet_entry(store)
-    outcome = await GovernanceService(store).record_feedback(CONTRIBUTOR, eid, Verdict.STALE)
+    outcome = await FeedbackService(store).record_feedback(CONTRIBUTOR, eid, Verdict.STALE)
     assert outcome.may_supersede is True
 
 

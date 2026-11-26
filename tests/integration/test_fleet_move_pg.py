@@ -15,6 +15,7 @@ from hivemind.domain.audit import AuditFilters
 from hivemind.domain.fleet_merge import FleetMoveRefused
 from hivemind.mcp.app import hive_get, hive_list, hive_whoami, hive_write
 from hivemind.services.access import AccessService
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.store import PgStore
 from hivemind.store.keys import _issue_admin
 from hivemind.store.pgstore import fleet_guards
@@ -187,6 +188,7 @@ async def test_agents_read_what_they_wrote_with_the_same_key_after_the_move(pool
     admin = await auth.verify(await _issue_admin(dsn, actor="test"))
     assert admin is not None
     access = AccessService(store, auth)
+    merges = FleetMergeService(store)
     a, b = await access.create_fleet("alpha", admin), await access.create_fleet("beta", admin)
     keys: dict[str, str] = {}
     for name, fleet in (("amy", a), ("ann", a), ("bo", b)):
@@ -198,7 +200,7 @@ async def test_agents_read_what_they_wrote_with_the_same_key_after_the_move(pool
     mine = await hive_write(pg_surface(store, amy), kind="fact", summary="amy's alpha knowledge")
     await hive_write(pg_surface(store, ann), kind="fact", summary="ann's alpha knowledge")
 
-    out = await access.merges.move(a.id, ["amy"], admin, target_fleet_id=b.id)
+    out = await merges.move(a.id, ["amy"], admin, target_fleet_id=b.id)
     assert out.entries_moved == 1 and out.entries_held_back == 0
 
     amy_again = await auth.verify(keys["amy"])  # the same key, no credential cache
@@ -222,6 +224,7 @@ async def test_undo_after_later_writes_and_the_audit_trail(pool) -> None:
     admin = await auth.verify(await _issue_admin(dsn, actor="test"))
     assert admin is not None
     access = AccessService(store, auth)
+    merges = FleetMergeService(store)
     a, b = await access.create_fleet("alpha", admin), await access.create_fleet("beta", admin)
     for name in ("amy", "ann"):
         await store.register_agent(name)
@@ -231,17 +234,17 @@ async def test_undo_after_later_writes_and_the_audit_trail(pool) -> None:
     await store.pin_entry(a.id, pinned.id, "ann", 10)  # a stayer's pin on amy's memory
     anns = await store.create_entry(fleet_draft(a.id, "ann's", "ann"), None)
 
-    out = await access.merges.move(a.id, ["amy"], admin, target_fleet_id=b.id)
+    out = await merges.move(a.id, ["amy"], admin, target_fleet_id=b.id)
     late = await store.create_entry(fleet_draft(b.id, "written after", "amy"), None)
     assert [p.entry_id for p in await store.list_pins(b.id)] == [pinned.id]
 
-    undone = await access.merges.undo(out.record.id, admin)
+    undone = await merges.undo(out.record.id, admin)
     assert (undone.entries_restored, undone.agents_restored) == (2, ("amy",))
     homes = {e.id: (await store.get_entry(e.id)).fleet_id for e in (v1, pinned, anns, late)}  # type: ignore[union-attr]
     assert homes == {v1.id: a.id, pinned.id: a.id, anns.id: a.id, late.id: b.id}
     assert [p.entry_id for p in await store.list_pins(a.id)] == [pinned.id]
     assert (await store.get_agent("amy")).home_fleet_id == a.id  # type: ignore[union-attr]
-    (view,) = await access.merges.list_merges(admin)
+    (view,) = await merges.list_merges(admin)
     assert view.record.kind == "move" and view.record.undone_at is not None and not view.undoable
     assert (await store.get_fleet(a.id)).merged_into is None  # type: ignore[union-attr]
     audits = await store.list_audit(AuditFilters(), 100)

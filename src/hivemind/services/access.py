@@ -46,14 +46,9 @@ from hivemind.domain.validation import (
     validate_owner_alias,
 )
 from hivemind.ports import Authenticator, Credential, Store
-from hivemind.services.agent_cleanup import AgentCleanupService
-from hivemind.services.agent_history import AgentHistoryService
 from hivemind.services.audit import actor_kind_of, record_admin_action, with_former_names
 from hivemind.services.errors import NameTaken, PermissionDenied
-from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.guards import require_admin
-from hivemind.services.offboarding import OffboardingService
-from hivemind.services.successions import SuccessionService
 
 _NAME_TAKEN = "agent name is already taken (names are never reused; pick another name)"
 
@@ -112,17 +107,12 @@ class AccessService:
         self._store = store
         self._authenticator = authenticator
         self._clock = clock
-        self.merges = FleetMergeService(store)
-        self.successions = SuccessionService(store, self._require_authenticator)
-        self.offboarding = OffboardingService(store, self._require_authenticator)
-        self.history = AgentHistoryService(store)
-        self.cleanups = AgentCleanupService(store, revoke=self.revoke, revocable=self.revocable)
         # Called after an owner alias changes, to drop cached owner-level figures (ADR 0122).
         self.on_owner_change: list[Callable[[], None]] = []
         # Called after an agent is renamed, to drop cached figures keyed by its name (ADR 0159).
         self.on_agent_rename: list[Callable[[], None]] = []
 
-    def _require_authenticator(self) -> Authenticator:
+    def require_authenticator(self) -> Authenticator:
         """The authenticator for key management (absent in dev mode)."""
         if self._authenticator is None:
             raise PermissionDenied(
@@ -196,7 +186,7 @@ class AccessService:
         agent = await self._store.activate_agent(
             name, trust_level=trust_level, home_fleet_id=home_fleet_id
         )
-        key = await self._require_authenticator().issue_agent_key(name)
+        key = await self.require_authenticator().issue_agent_key(name)
         await self._audit(
             credential,
             AuditAction.AGENT_ACTIVATE,
@@ -224,7 +214,7 @@ class AccessService:
         validate_owner_alias(owner_alias)
         if not owner_alias.strip():
             raise InvalidInput("owner_alias is required")
-        self._require_authenticator()  # dev mode has no keys to issue: fail before any write
+        self.require_authenticator()  # dev mode has no keys to issue: fail before any write
         await self._require_fleet(home_fleet_id)
         existing = await self._store.get_agent(name)
         if existing is not None:
@@ -243,7 +233,7 @@ class AccessService:
         at once; ``InvalidAgentStatus`` unless ``active``. The audit row has both fingerprints."""
         require_admin(credential)
         # The authenticator audits in the swap's transaction: no window with a new key and no row.
-        replacement = await self._require_authenticator().replace_agent_key(
+        replacement = await self.require_authenticator().replace_agent_key(
             name,
             audit_actor_kind=actor_kind_of(credential),
             audit_actor=credential.audit_actor(),
@@ -262,7 +252,7 @@ class AccessService:
             or credential.key_id is None
         ):
             raise PermissionDenied("locking a key requires an agent key")
-        return await self._require_authenticator().lock_agent_key(
+        return await self.require_authenticator().lock_agent_key(
             credential.agent_name, key_id=credential.key_id
         )
 
@@ -457,7 +447,7 @@ class AccessService:
             raise UnknownAgent(f"unknown agent: {name}")
         if before.status not in REVOCABLE:
             raise InvalidAgentStatus(name, before.status, "revoke")
-        authenticator = self._require_authenticator()
+        authenticator = self.require_authenticator()
         await self._store.revoke_agent(name)
         await authenticator.revoke_agent_key(name)
         await self._audit(credential, AuditAction.AGENT_REVOKE, name, {"from": before.status.value})
@@ -471,14 +461,14 @@ class AccessService:
             raise UnknownAgent(f"unknown agent: {name}")
         if agent.status not in REVOCABLE:
             return False
-        self._require_authenticator()
+        self.require_authenticator()
         return True
 
     async def rotate_org_key(self, credential: Credential) -> str:
         """Rotate the shared org key (ADR 0031): prior org keys stop; the new key is returned
         once."""
         require_admin(credential)
-        key = await self._require_authenticator().rotate_org_key()
+        key = await self.require_authenticator().rotate_org_key()
         await self._audit(credential, AuditAction.ORG_KEY_ROTATE, None)
         return key
 
@@ -510,7 +500,7 @@ class AccessService:
         """The credential an active agent searches with, for the admin's "search as" (ADR 0136):
         ``UnknownSearchAgent`` or ``AgentNotActive`` when it has none. Never carries key material."""
         require_admin(credential)
-        agent_credential = await self._require_authenticator().credential_for_agent(name)
+        agent_credential = await self.require_authenticator().credential_for_agent(name)
         if agent_credential is not None:
             return agent_credential
         agent = await self._store.get_agent(name)

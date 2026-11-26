@@ -231,9 +231,7 @@ async def admin_feedback(
         fleet_id=fleet_id,
         entry_id=entry_id,
     )
-    items = await app.governance_service.feedback_log(
-        credential, filters, limit=limit, offset=offset
-    )
+    items = await app.feedback_service.feedback_log(credential, filters, limit=limit, offset=offset)
     return [FeedbackLogItemOut.from_item(i) for i in items]
 
 
@@ -252,7 +250,7 @@ async def admin_flagged(
     whether the author is still around. ``older_than_days`` keeps
     entries first flagged more than that many days ago; ``orphaned`` keeps
     entries with no owner. Observation only, like the health metrics."""
-    items = await app.governance_service.flag_backlog(
+    items = await app.feedback_service.flag_backlog(
         credential,
         fleet_id=fleet_id,
         older_than=timedelta(days=older_than_days),
@@ -270,5 +268,5 @@ async def admin_fleet_pins(fleet_id: NameParam, credential: CredentialDep, app: 
     was pinned. 404 for a fleet that does not exist."""
     if await app.store.get_fleet(fleet_id) is None:
         raise api_error(404, "not_found", f"unknown fleet: {fleet_id}")
-    pinned = await app.governance_service.pinned(credential, fleet_id)
+    pinned = await app.pin_service.pinned(credential, fleet_id)
     return PinsOut(fleet_id=fleet_id, pins=[PinnedOut.from_pinned(p) for p in pinned])

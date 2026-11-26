@@ -47,7 +47,7 @@ async def cleanup_agent(
     that is not restorable. With nothing to clean the answer is 200 with
     zero counts and no ``cleanup_id``. 404 unknown agent, 422 empty window or
     a missing ``expected_*`` count on an apply."""
-    cleanups = app.access_service.cleanups
+    cleanups = app.cleanup_service
     if payload.dry_run:
         preview = await cleanups.preview(name, credential, since=payload.since, until=payload.until)
         return AgentCleanupPreviewOut.from_preview(preview)
@@ -72,7 +72,7 @@ async def list_agent_cleanups(
 ) -> list[AgentCleanupRecordOut]:
     """Recorded agent cleanups, newest first (admin-gated, ADR 0111), each
     with whether it can be undone now."""
-    views = await app.access_service.cleanups.list_cleanups(credential)
+    views = await app.cleanup_service.list_cleanups(credential)
     return [AgentCleanupRecordOut.from_view(v) for v in views]
 
 
@@ -86,7 +86,7 @@ async def undo_agent_cleanup(
     marks are cleared and its pins are restored where the fleet has room.
     It does not un-revoke the agent. Only the newest standing cleanup of
     an agent can be undone (409 ``cleanup_refused``)."""
-    outcome = await app.access_service.cleanups.undo(cleanup_id, credential)
+    outcome = await app.cleanup_service.undo(cleanup_id, credential)
     return AgentCleanupUndoOut.from_outcome(
         outcome,
         note=(

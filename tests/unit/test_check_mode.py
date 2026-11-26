@@ -12,14 +12,9 @@ from hivemind.config import Settings
 from hivemind.domain.access import TrustLevel
 from hivemind.domain.entry import EntryDraft, EntryFilters, ExtractedEntity
 from hivemind.domain.feedback import Feedback, Verdict
-from hivemind.mcp.app import McpHivemind, hive_write
+from hivemind.mcp.app import hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
 from tests.fakes import (
     FakeAuthenticator,
     FakeExtractor,
@@ -110,15 +105,8 @@ async def test_check_does_not_run_the_extractor() -> None:
     store = MemoryStore(make_clock())
     extractor = Spy()
     embedder, config, clock = make_embedder(), make_search_config(), make_clock()
-    app = McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder, extractor),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=WRITER,
+    app = mcp_surface(
+        store, WRITER, embedder=embedder, extractor=extractor, config=config, clock=clock
     )
     await hive_write(app, kind="fact", summary="Postgres on node 20", check=True)
     assert extractor.calls == 0

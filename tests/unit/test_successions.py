@@ -42,7 +42,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.errors import PermissionDenied
 from hivemind.services.ownership import own_author_filter
-from tests.fakes import FakeAuthenticator, make_embedder, make_search_config
+from tests.fakes import FakeAuthenticator, make_embedder, make_search_config, mcp_surface
 
 ADMIN = Credential(user_id="admin", is_admin=True, key_id="abcdef012345")
 T0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
@@ -96,7 +96,7 @@ class World:
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=create_app(self.app)), base_url="http://t"
         )
-        self.successions = self.app.access_service.successions
+        self.successions = self.app.succession_service
         self.blue = ""
         self.red = ""
 
@@ -528,27 +528,14 @@ async def test_a_cycle_is_refused(w: World) -> None:
 
 async def test_mcp_tools_apply_the_same_ownership(w: World) -> None:
     from hivemind.mcp.app import McpHivemind, hive_get, hive_whoami, hive_withdraw
-    from hivemind.services.governance import GovernanceService
-    from hivemind.services.read import ReadService
-    from hivemind.services.search import SearchService
-    from hivemind.services.write import WriteService
-    from tests.fakes import make_clock
 
     note = await w.entry("old", "old private note")
     await retire(w)
 
     def mcp_for(name: str, inherits: tuple[str, ...]) -> McpHivemind:
-        gov = GovernanceService(w.store)
-        config = make_search_config()
-        return McpHivemind(
-            store=w.store,
-            write_service=WriteService(w.store, make_embedder()),
-            search_service=SearchService(w.store, make_embedder(), config, now_fn=make_clock()),
-            governance_service=gov,
-            read_service=ReadService(w.store, gov, config),
-            access_service=w.app.access_service,
-            search_config=config,
-            credential=Credential(
+        return mcp_surface(
+            w.store,
+            Credential(
                 user_id=name,
                 agent_id=name,
                 agent_name=name,
@@ -557,6 +544,7 @@ async def test_mcp_tools_apply_the_same_ownership(w: World) -> None:
                 home_fleet_id=w.blue,
                 inherits_from=inherits,
             ),
+            access=w.app.access_service,
         )
 
     heir, stranger = mcp_for("heir", ("old",)), mcp_for("other", ())

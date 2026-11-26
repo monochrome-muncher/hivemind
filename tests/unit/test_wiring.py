@@ -41,7 +41,7 @@ async def test_the_search_config_reaches_search_and_quality() -> None:
     config = make_search_config()
     services = build_services(make_store(), make_embedder(), config)
     assert services.search_config is config
-    assert await services.governance_service.quality("no-such-entry") == pytest.approx(1.0)
+    assert await services.feedback_service.quality("no-such-entry") == pytest.approx(1.0)
 
 
 async def test_the_quality_weights_of_the_config_reach_the_quality_multiplier() -> None:
@@ -55,7 +55,7 @@ async def test_the_quality_weights_of_the_config_reach_the_quality_multiplier() 
     for stale_weight in (0.4, 0.1):
         config = replace(make_search_config(), quality_stale_weight=stale_weight)
         services = build_services(store, make_embedder(), config)
-        quality = await services.governance_service.quality(entry.id)
+        quality = await services.feedback_service.quality(entry.id)
         assert quality == pytest.approx(
             feedback_quality(1, 1, 0, **config.quality_kwargs(confirmed=False))
         )

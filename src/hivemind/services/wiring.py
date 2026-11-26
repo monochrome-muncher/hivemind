@@ -10,11 +10,18 @@ from hivemind.config import SearchConfig, Settings, redact_url
 from hivemind.ports import Authenticator, Embedder, Extractor, Store
 from hivemind.services.access import AccessService
 from hivemind.services.activity import ActivityService
+from hivemind.services.agent_cleanup import AgentCleanupService
+from hivemind.services.agent_history import AgentHistoryService
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.fleet_activity import FleetActivityService
+from hivemind.services.fleet_merge import FleetMergeService
 from hivemind.services.governance import GovernanceService
 from hivemind.services.metrics import DEFAULT_ENTRY_COUNTS_TTL, MetricsService
+from hivemind.services.offboarding import OffboardingService
+from hivemind.services.pins import PinService
 from hivemind.services.read import ReadService
 from hivemind.services.search import SearchService
+from hivemind.services.successions import SuccessionService
 from hivemind.services.write import WriteService
 
 
@@ -26,8 +33,15 @@ class Services:
     write_service: WriteService
     read_service: ReadService
     search_service: SearchService
+    feedback_service: FeedbackService
+    pin_service: PinService
     governance_service: GovernanceService
     access_service: AccessService
+    merge_service: FleetMergeService
+    succession_service: SuccessionService
+    offboarding_service: OffboardingService
+    cleanup_service: AgentCleanupService
+    history_service: AgentHistoryService
     metrics_service: MetricsService
     activity_service: ActivityService
     fleet_activity_service: FleetActivityService
@@ -48,10 +62,15 @@ def build_services(
     feedback and pins downgrade a dev-mode credential here; every other service gets it where the
     surface resolves its credential, so a script calling them directly must apply
     ``Credential.effective`` itself."""
-    governance_service = GovernanceService(
+    feedback_service = FeedbackService(
         store, search_config, require_stored_keys=require_stored_keys
     )
+    pin_service = PinService(store, require_stored_keys=require_stored_keys)
     access_service = AccessService(store, authenticator)
+    merge_service = FleetMergeService(store)
+    cleanup_service = AgentCleanupService(
+        store, revoke=access_service.revoke, revocable=access_service.revocable
+    )
     metrics_service = MetricsService(store, entry_counts_ttl=metrics_entry_counts_ttl)
     activity_service = ActivityService(store, ttl=metrics_entry_counts_ttl)
     fleet_activity_service = FleetActivityService(store, ttl=metrics_entry_counts_ttl)
@@ -61,9 +80,9 @@ def build_services(
         fleet_activity_service.invalidate,
     ]
     # A merge or undo moves entries between fleets: drop the cached scans.
-    access_service.merges.on_change += drop_cached
+    merge_service.on_change += drop_cached
     # So does a cleanup and its undo.
-    access_service.cleanups.on_change += drop_cached
+    cleanup_service.on_change += drop_cached
     # A corrected owner alias regroups the owner-level health figures.
     access_service.on_owner_change += drop_cached
     # A renamed agent changes the names in the cached per-agent figures.
@@ -71,10 +90,17 @@ def build_services(
     return Services(
         search_config=search_config,
         write_service=WriteService(store, embedder, extractor),
-        governance_service=governance_service,
-        read_service=ReadService(store, governance_service, search_config),
+        read_service=ReadService(store, feedback_service, search_config),
         search_service=SearchService(store, embedder, search_config),
+        feedback_service=feedback_service,
+        pin_service=pin_service,
+        governance_service=GovernanceService(store, pin_service),
         access_service=access_service,
+        merge_service=merge_service,
+        succession_service=SuccessionService(store, access_service.require_authenticator),
+        offboarding_service=OffboardingService(store, access_service.require_authenticator),
+        cleanup_service=cleanup_service,
+        history_service=AgentHistoryService(store),
         metrics_service=metrics_service,
         activity_service=activity_service,
         fleet_activity_service=fleet_activity_service,

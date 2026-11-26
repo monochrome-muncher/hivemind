@@ -105,7 +105,7 @@ async def merge_fleet(
     ``keep_pin_ids`` (422); ``expected_pin_ids`` (the pins the preview showed)
     refuses the merge when they changed since (409 ``merge_refused``). 404 unknown fleet, 409 ``fleet_merged`` /
     ``merge_refused`` / ``fleet_exists``."""
-    merges = app.access_service.merges
+    merges = app.merge_service
     if payload.dry_run:
         preview = await merges.preview(
             source_id,
@@ -144,7 +144,7 @@ async def move_fleet_agents(
     404 unknown fleet, 409 ``fleet_merged`` / ``move_refused`` (also an
     agent that is not in the fleet, named in the message) /
     ``fleet_exists``. Undo is the merge undo route."""
-    merges = app.access_service.merges
+    merges = app.merge_service
     if payload.dry_run:
         preview = await merges.preview_move(
             source_id,
@@ -170,7 +170,7 @@ async def move_fleet_agents(
 async def list_fleet_merges(credential: CredentialDep, app: AppDep) -> list[FleetMergeRecordOut]:
     """Recorded fleet merges and moves (``kind``), newest first
     (admin-gated, ADR 0107, 0112), each with whether it can be undone now."""
-    views = await app.access_service.merges.list_merges(credential)
+    views = await app.merge_service.list_merges(credential)
     return [FleetMergeRecordOut.from_view(v) for v in views]
 
 
@@ -184,5 +184,5 @@ async def undo_fleet_merge(
     Only the newest standing merge or move involving the target (and, for
     a move, its source) can be undone (409 ``merge_refused`` /
     ``move_refused``)."""
-    outcome = await app.access_service.merges.undo(merge_id, credential)
+    outcome = await app.merge_service.undo(merge_id, credential)
     return FleetUnmergeOut.from_outcome(outcome)

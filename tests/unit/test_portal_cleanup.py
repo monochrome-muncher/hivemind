@@ -126,7 +126,7 @@ async def w():  # type: ignore[no-untyped-def]
 
 
 async def _retire(w: World) -> None:
-    await w.app.access_service.successions.retire("old", "successor", ADMIN)
+    await w.app.succession_service.retire("old", "successor", ADMIN)
 
 
 async def test_preview_changes_nothing_and_covers_what_the_agent_owns(w: World) -> None:
@@ -425,7 +425,7 @@ async def test_a_memory_in_a_fleet_the_key_cannot_read_is_never_offered_or_resto
 
     secret = await fleet_entry("peer2", "RED SECRET")
     await fleet_entry("old2", "junk", supersedes=(secret,))
-    await w.app.access_service.successions.retire("old2", "successor", ADMIN)
+    await w.app.succession_service.retire("old2", "successor", ADMIN)
     read = await w.client.get(f"/v1/entries/{secret}", headers=w.h("successor"))
     assert read.status_code == 404
 

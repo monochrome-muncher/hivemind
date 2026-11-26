@@ -16,6 +16,7 @@ from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
 from hivemind.services.access import AccessService
 from hivemind.services.errors import NameTaken, PermissionDenied
+from hivemind.services.fleet_merge import FleetMergeService
 from tests.fakes import FakeAuthenticator, make_client, make_store
 from tests.unit.test_api_endpoints import make_hivemind_app
 
@@ -88,7 +89,7 @@ async def test_a_bad_name_or_unknown_fleet_leaves_no_record() -> None:
 async def test_a_merged_fleet_is_refused_before_any_record() -> None:
     service, _, store, fleet_id = await _service()
     other = await store.create_fleet("old-ops")
-    await service.merges.merge(other.id, admin(), target_fleet_id=fleet_id)
+    await FleetMergeService(store).merge(other.id, admin(), target_fleet_id=fleet_id)
     with pytest.raises(FleetMerged):
         await service.create_agent("jane-laptop", "jane", TrustLevel.LURKER, other.id, admin())
     assert await store.get_agent("jane-laptop") is None

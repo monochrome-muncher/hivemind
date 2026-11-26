@@ -23,7 +23,7 @@ async def batch_feedback(
     All or nothing: an id the caller may not read is a 404 naming it,
     and one of the caller's own is a 403 (ADR 0065); nothing is recorded.
     """
-    outcomes = await app.governance_service.record_feedback_many(
+    outcomes = await app.feedback_service.record_feedback_many(
         credential,
         request.entry_ids,
         request.verdict,
@@ -42,7 +42,7 @@ async def feedback(
     A plain user key self-reports the agent instance via ``agent``
     (SPEC.md §8.1); an agent sub-key's credential agent wins.
     """
-    outcome = await app.governance_service.record_feedback(
+    outcome = await app.feedback_service.record_feedback(
         credential,
         entry_id,
         request.verdict,

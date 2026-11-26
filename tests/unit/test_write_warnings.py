@@ -17,11 +17,6 @@ from hivemind.domain.validation import MAX_BODY_CHARS
 from hivemind.mcp.app import McpHivemind, hive_write
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
-from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
 from hivemind.services.write_warnings import (
     answers_open_question_warning,
     has_local_path,
@@ -37,6 +32,7 @@ from tests.fakes import (
     make_clock,
     make_embedder,
     make_search_config,
+    mcp_surface,
 )
 
 
@@ -86,16 +82,7 @@ LEAD = agent_credential("lead", "fleet-a", TrustLevel.PRIVILEGED)
 def _surface(store: MemoryStore, credential: Credential, embedder: object = None) -> McpHivemind:
     clock, config = make_clock(), make_search_config()
     embedder = embedder if embedder is not None else make_embedder()
-    return McpHivemind(
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        read_service=ReadService(store, GovernanceService(store), config),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
+    return mcp_surface(store, credential, embedder=embedder, config=config, clock=clock)
 
 
 @pytest.mark.parametrize(

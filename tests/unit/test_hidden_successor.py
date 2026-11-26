@@ -13,17 +13,15 @@ from hivemind.domain.entry import Entry, EntryDraft, EntryFilters, EntryState
 from hivemind.mcp.app import McpHivemind, hive_get, hive_list
 from hivemind.memstore import MemoryStore
 from hivemind.ports import Credential
-from hivemind.services.access import AccessService
-from hivemind.services.governance import GovernanceService
+from hivemind.services.feedback import FeedbackService
 from hivemind.services.read import ReadService
-from hivemind.services.search import SearchService
-from hivemind.services.write import WriteService
 from tests.fakes import (
     FakeAuthenticator,
     agent_credential,
     make_clock,
     make_embedder,
     make_search_config,
+    mcp_surface,
 )
 
 # A wrote E in fleet-1, then moved to fleet-2 (still reads E as its own);
@@ -55,7 +53,7 @@ async def _world() -> tuple[MemoryStore, Entry, Entry, Entry]:
 
 
 def _read(store: MemoryStore) -> ReadService:
-    return ReadService(store, GovernanceService(store), make_search_config())
+    return ReadService(store, FeedbackService(store), make_search_config())
 
 
 async def test_a_hidden_successor_is_dropped_on_single_batch_and_list_reads() -> None:
@@ -145,16 +143,7 @@ def _with(entry: Entry, **changes: object) -> Entry:
 
 def _surface(store: MemoryStore, credential: Credential) -> McpHivemind:
     clock, embedder, config = make_clock(), make_embedder(), make_search_config()
-    return McpHivemind(
-        read_service=_read(store),
-        store=store,
-        write_service=WriteService(store, embedder),
-        search_service=SearchService(store, embedder, config, now_fn=clock),
-        governance_service=GovernanceService(store),
-        access_service=AccessService(store),
-        search_config=config,
-        credential=credential,
-    )
+    return mcp_surface(store, credential, embedder=embedder, config=config, clock=clock)
 
 
 async def test_mcp_get_and_list_drop_a_hidden_successor() -> None:
