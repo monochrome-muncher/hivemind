@@ -22,7 +22,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "mcp>=2.0.0,<3",
+    "mcp>=2.2.0,<3",
     "httpx2>=2.14",
     "exceptiongroup>=1.2; python_version < '3.11'",
 ]
@@ -34,13 +34,13 @@ Issues = "https://github.com/monochrome-muncher/hivemind/issues"
 Changelog = "https://github.com/monochrome-muncher/hivemind/blob/main/plugins/hivemind/CHANGELOG.md"
 
 [project.optional-dependencies]
-langchain = ["langchain-core>=1.0,<2"]
+langchain = ["langchain-core>=1.3.3,<2"]
 
 [dependency-groups]
 test = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
-    "langchain-core>=1.0,<2",
+    "langchain-core>=1.3.3,<2",
 ]
 
 [tool.hatch.build.targets.wheel]
