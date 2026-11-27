@@ -16,7 +16,7 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
 fi
 
 # Keep in step with .github/workflows/tests.yml.
-UV_VERSION="0.13.9"
+UV_VERSION="0.13.10"
 PYTHON_VERSION="3.14.10"
 PGVECTOR_VERSION="0.8.7"
 PG_MAJOR="16"
