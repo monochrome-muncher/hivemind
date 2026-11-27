@@ -141,7 +141,7 @@ console.log(text);
 
 Set `stopWhen`: by default `generateText` stops after one step, so the model would call a tool and never see the result. Errors reach the model as text, as with `runTool`.
 
-For the end-of-task reminder, use `generateTextWithReminder` instead of `generateText`. It counts every tool call of every step once, by its id, and if the reminder is due, runs once more with it as the next user message:
+For the end-of-task reminder, use `generateTextWithReminder` instead of `generateText`. It counts every tool call of every step once, by its id, and if the reminder is due, runs once more with it as the next user message. A run that stopped for a tool approval or a missing tool result gets no reminder, so the reminder stays due for the next call:
 
 ```ts
 import { generateTextWithReminder } from "hivemind-memory/ai-sdk";

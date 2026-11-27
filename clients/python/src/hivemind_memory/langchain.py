@@ -42,10 +42,13 @@ async def ainvoke_with_reminder(
 
     Every tool call in the agent's messages is counted once, by its id, so a checkpointer that
     returns the whole thread does not count earlier turns again. Returns the task's state and the
-    reminder run's state, or ``None`` when no reminder was due.
+    reminder run's state, or ``None`` when no reminder was due. A run that paused for a human
+    approval, or ended on tool calls without results, is not reminded and keeps the reminder due.
     """
     state = await agent.ainvoke(input, **kwargs)
     _count_tool_calls(conversation, state)
+    if _awaits_tool_results(state):
+        return state, None
     reminder = conversation.reminder_due()
     if reminder is None:
         return state, None
@@ -55,6 +58,12 @@ async def ainvoke_with_reminder(
     )
     _count_tool_calls(conversation, reminded)
     return state, reminded
+
+
+def _awaits_tool_results(state: Mapping[str, Any]) -> bool:
+    messages = state.get("messages") or []
+    last = messages[-1] if messages else None
+    return "__interrupt__" in state or (isinstance(last, AIMessage) and bool(last.tool_calls))
 
 
 def _count_tool_calls(conversation: Conversation, state: Mapping[str, Any]) -> None:
