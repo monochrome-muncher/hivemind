@@ -1,4 +1,4 @@
-# ROADMAP.md — Hivemind (what is open, what is held)
+# ROADMAP.md: Hivemind (what is open, what is held)
 
 > **What this document is:** the working plan. It is **not** the spec
 > (SPEC.md owns behavior) and **not** the decision log (docs/adr/ owns
@@ -7,11 +7,11 @@
 
 ## Where we are
 
-Tiers 1–3 are shipped: the retrieval eval harness, the fleet and trust
+Tiers 1 to 3 are shipped: the retrieval eval harness, the fleet and trust
 model, and the production work (deployment, migrations, vector index,
 replicas, audit log, admin panel, agent plugin, the 2.0.0 security
-review, the 2.1.0–2.3.0 retrieval and knowledge-sharing features, and
-the 2.4.0–2.5.0 search threshold and feedback work). The hive-mind study's
+review, the 2.1.0 to 2.3.0 retrieval and knowledge-sharing features, and
+the 2.4.0 to 2.5.0 search threshold and feedback work). The hive-mind study's
 ranking, evidence and fleet-health items shipped in 2.6.0, with every new
 ranking feature off by default (§3.15). 2.7.0 added the admin panel's memory
 browser, activity and stats (ADR 0080); 2.8.0 added GitHub Copilot CLI
@@ -19,11 +19,11 @@ support, `upstream_changed` on search hits (ADR 0081) and faster search;
 2.8.1 was documentation only. 2.9.0 added the `HIVEMIND_REQUIRE_STORED_KEYS`
 setting (ADR 0082) and the standalone docker stack, and split the entry-read
 path, the wire mappers and the MCP package into their own modules
-(ADRs 0083–0085).
+(ADRs 0083 to 0085).
 2.10.0 narrowed the author importance factor and turned it on by default
 (ADR 0088), added the `near_duplicate` write warning (ADR 0087) and the agent
 portal (ADR 0095), and gave the admin panel a feedback log, an agent page,
-fleet pins, a flag backlog and CSV export (ADRs 0089–0094).
+fleet pins, a flag backlog and CSV export (ADRs 0089 to 0094).
 2.11.0 changed ranking with no config change: the Qwen3 query
 instruction on by default (ADR 0097), the 0.45 similarity cut-off
 (ADR 0100), the recency hint honoured (ADR 0101), the
@@ -97,7 +97,7 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   0156).
 - **4.1 BM25** stays deferred; revisit only on observed keyword misses.
 
-## Tier 1 — validate the core  *(shipped)*
+## Tier 1: validate the core  *(shipped)*
 
 ### 1.1 Retrieval eval harness + golden set  *(shipped: `tests/eval/`, `retrieval/eval.py`)*
 A deterministic entry set and a golden query set, run through
@@ -115,7 +115,7 @@ caught one real defect, a forced `scope="org"` default that rejected
 every L1/L2 write with an omitted scope, fixed at all three seams.
 Friction is logged in `docs/dogfooding-notes.md`.
 
-## Tier 2 — access control & fleet model (ADRs 0011–0012, SPEC §12)  *(shipped)*
+## Tier 2: access control & fleet model (ADRs 0011 and 0012, SPEC §12)  *(shipped)*
 
 ### 2.1 Domain + store: fleets, agents, trust levels  *(shipped)*
 `fleets` and `agents` tables, entry scopes `self` / `fleet` (legacy `org`
@@ -129,7 +129,7 @@ key is shown once, at activation.
 The MCP runners present agent keys; `hivemind-keys` is reduced to admin
 keys, agent-key issue and org-key rotation.
 
-## Tier 3 — productionize  *(shipped; 3.2 superseded by 3.5)*
+## Tier 3: productionize  *(shipped; 3.2 superseded by 3.5)*
 
 ### 3.1 Ops runbook  *(shipped: `docs/ops-runbook.md`)*
 Deployment, backups, monitoring and key rotation for a single node.
@@ -178,7 +178,7 @@ An insert-only audit log written by the REST admin surface (actor: the
 admin key's fingerprint) and the CLI (an unverified `--actor`), read at
 `GET /v1/admin/audit-log`. Registrations are audited since ADR 0046.
 
-### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028–0029, 0080, 0090–0095, 0107–0125, 0127, migrations `0006` and later, DEPLOY.md §8–§9)*
+### 3.9 Admin panel and agent portal  *(shipped: ADRs 0028 and 0029, 0080, 0090 to 0095, 0107 to 0125, 0127, migrations `0006` and later, DEPLOY.md §8 and §9)*
 A browser front end for the admin surface, with a pending-agent queue.
 It needed the `revoked` agent status first (ADR 0028). The admin key
 lives in the tab's `sessionStorage` behind a strict CSP; keep the panel
@@ -202,7 +202,7 @@ self-service cleanup with undo (ADR 0118) and the agent's history
 (ADR 0123). Keep it on an internal
 ingress as well.
 
-### 3.10 Agent plugin and skills  *(shipped: ADRs 0030–0031, `plugins/hivemind/`)*
+### 3.10 Agent plugin and skills  *(shipped: ADRs 0030 and 0031, `plugins/hivemind/`)*
 The plugin and skills that make Hivemind an agent's long-term memory, now
 for Claude Code, Codex, Cursor, DeepSeek Harness, Gemini CLI, Google
 Antigravity, GitHub Copilot CLI, Hermes, Junie, Pi, Oh My Pi, OpenCode,
@@ -213,12 +213,12 @@ Cline and KiloCode. It needed `hive_whoami`
 Reads by id, the supersession chain, feedback and supersession follow
 readability; provenance comes from the key on both surfaces.
 
-### 3.12 Incognito sessions and foreign entries  *(shipped in 1.1.0: ADRs 0035–0036)*
+### 3.12 Incognito sessions and foreign entries  *(shipped in 1.1.0: ADRs 0035 and 0036)*
 A client-side off switch with marked local notes, and "use, don't relay"
 for privileged agents. **Held:** a per-fleet "sensitive" flag, if the
 conservative default proves too loose (ADR 0036).
 
-### 3.13 Security, correctness and performance review  *(shipped in 2.0.0: ADRs 0039–0043, migrations `0007`–`0008`)*
+### 3.13 Security, correctness and performance review  *(shipped in 2.0.0: ADRs 0039 to 0043, migrations `0007` and `0008`)*
 An atomic key lifecycle (ADR 0039), shared input bounds (ADR 0040),
 provider deadlines (ADR 0041), a per-call MCP credential (ADR 0042),
 entries as untrusted data (ADR 0043), atomic supersession, indexed
@@ -260,7 +260,7 @@ or its own trigger):
   Gemini CLI's `SessionStart` injects the reminder, and DeepSeek
   Harness keeps the server instructions through compaction.
 
-### 3.14 Retrieval and knowledge sharing  *(shipped in 2.1.0–2.3.0: ADRs 0047–0058, migrations `0010`–`0012`)*
+### 3.14 Retrieval and knowledge sharing  *(shipped in 2.1.0 to 2.3.0: ADRs 0047 to 0058, migrations `0010` to `0012`)*
 The keyword stream matches any term (ADR 0047), at most 16 on Postgres
 (ADR 0049), and search falls back to it when the embedder is down
 (ADR 0048). A Prometheus scrape endpoint (ADR 0050). Feedback is readable
@@ -269,9 +269,9 @@ and batch reads (ADRs 0053, 0055); a `flagged` filter (ADR 0054);
 empty-search counters (ADR 0056); see-also links (ADR 0057); a pinned
 fleet briefing (ADR 0058).
 
-### 3.15 Feedback, ranking evidence and fleet health  *(2.4.0–2.5.0: ADRs 0061–0069, migration `0013`; 2.6.0: ADRs 0070–0078, migrations `0014`–`0015`)*
+### 3.15 Feedback, ranking evidence and fleet health  *(2.4.0 to 2.5.0: ADRs 0061 to 0069, migration `0013`; 2.6.0: ADRs 0070 to 0078, migrations `0014` and `0015`)*
 A similarity threshold for the vector stream (ADR 0062, on at 0.45 by default per ADR 0100).
-Feedback quality by consensus share and its guards (ADRs 0063–0067) and
+Feedback quality by consensus share and its guards (ADRs 0063 to 0067) and
 the rater flag metric (ADR 0068). From the hive-mind study
 ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
 one capped budget for social signals (ADR 0070); evidence on hits
@@ -287,19 +287,19 @@ counts those flags at half weight (ADR 0106).
 Explore search is opt-in per search (ADR 0078). Results are in
 [docs/retrieval-experiments.md](docs/retrieval-experiments.md).
 
-## Tier 4 — close the spec's open items (SPEC §11)
+## Tier 4: close the spec's open items (SPEC §11)
 
-*(4.1–4.2 are the §11 open items. 4.3–4.6 share the §1.1 harness.)*
+*(4.1 to 4.2 are the §11 open items. 4.3 to 4.6 share the §1.1 harness.)*
 
-- **4.1 BM25 vs. Postgres FTS.** *(**DEFERRED** — the analysis below is
+- **4.1 BM25 vs. Postgres FTS.** *(**DEFERRED**: the analysis below is
   the reason; do not re-derive it. Deferred, not dismissed: the thing
   BM25 would buy is real and named at the end.)* The store uses Postgres
   FTS (`to_tsvector` + `ts_rank`). Two findings moved this off the
   "measure it next" list:
 
   **1. It is a deployment-topology change, not a query change.**
-  Postgres has no native BM25. Getting it means an *extension* —
-  ParadeDB `pg_search` or VectorChord-BM25 — and neither ships in the
+  Postgres has no native BM25. Getting it means an *extension*:
+  ParadeDB `pg_search` or VectorChord-BM25, and neither ships in the
   stock `pgvector/pgvector:pg16` image this deployment runs (ADR 0007,
   `docker-compose.yaml`, `.gitlab-ci.yml`, the k8s manifests). Adopting
   one means building and maintaining a custom Postgres image and
@@ -307,11 +307,11 @@ Explore search is opt-in per search (ADR 0078). Results are in
   is a different class of decision from "tune a ranker", and it has to
   be priced as one.
 
-  **2. RRF consumes ranks, not scores — so most of BM25's advantage is
+  **2. RRF consumes ranks, not scores, so most of BM25's advantage is
   discarded at the fusion seam.** `retrieval/rrf.py` computes
   `w / (k + rank)`; the keyword stream's *scores* never reach the fused
-  result. BM25's headline advantages — calibrated magnitudes, IDF
-  weighting, document-length normalisation — survive fusion **only**
+  result. BM25's headline advantages (calibrated magnitudes, IDF
+  weighting, document-length normalisation) survive fusion **only**
   insofar as they change the **top-20 ordering** (`candidate_top_k`)
   that `ts_rank` already produces. The upside is bounded by "does BM25
   order the first 20 keyword hits better", not by "is BM25 a better
@@ -319,7 +319,7 @@ Explore search is opt-in per search (ADR 0078). Results are in
   that.
 
   **What BM25 would actually buy, and why this is deferred rather than
-  closed:** `ts_rank` has **no IDF at all** — it weights a rare,
+  closed:** `ts_rank` has **no IDF at all**: it weights a rare,
   discriminating term the same as a common one. On an org-wide pool
   where nearly every entry says "service", "deploy" or "agent", that is
   a real ranking defect, and it is the one BM25 fixes. Revisit when
@@ -328,10 +328,10 @@ Explore search is opt-in per search (ADR 0078). Results are in
   decision. Note the coupling recorded in §4.6: `rrf_k` controls how
   much the *weaker* ranker's mistakes cost, and `ts_rank` is the weaker
   ranker.
-- **4.2 What goes into the embedded text.** *(rescoped — this item was
+- **4.2 What goes into the embedded text.** *(rescoped: this item was
   one knob standing in for three separable questions)*
 
-  **(a) WHAT is embedded — measured, no change (2026-10-29).** Today:
+  **(a) WHAT is embedded: measured, no change (2026-10-29).** Today:
   `summary` + a bounded `body` prefix (SPEC §7). Measured against
   Qwen3-Embedding-0.6B and -8B on the sixteen-domain corpus (`make
   measure-embed-text`, `tests/eval/embed_text.py`, in
@@ -341,7 +341,7 @@ Explore search is opt-in per search (ADR 0078). Results are in
   domain-specific and not the same in both. No field is a consistent win, so
   the current text stands; no code change.
 
-  **(b) HOW MUCH, and in what unit — settled by ADR 0021.** The budget
+  **(b) HOW MUCH, and in what unit: settled by ADR 0021.** The budget
   is **2000 whitespace-delimited words** (`EMBEDDING_PREFIX_TOKENS`),
   replacing the 2048-character bound. The unit question is closed; the
   *value* stays tunable as ordinary config.
@@ -354,12 +354,12 @@ Explore search is opt-in per search (ADR 0078). Results are in
   constant. ADR 0021 fixed that and pinned the ADR 0016 lockstep with a
   test; *this* is what makes the (a) experiment runnable at all.
 
-  **(c) CHUNKING — explicitly out of scope for this item.** SPEC §4.1
+  **(c) CHUNKING: explicitly out of scope for this item.** SPEC §4.1
   commits to **one embedding per entry**. Chunking means several
   vectors per entry plus a retrieval change (which chunk's score
   represents the entry, how duplicates collapse before fusion, what a
   `hit` even points at). That is a different decision with its own ADR,
-  not a tuning pass — do not fold it in here.
+  not a tuning pass; do not fold it in here.
 
   (The embedding *dimension* is a separate deploy-time decision: the
   default is 1024, ADR 0015.)
@@ -391,7 +391,7 @@ Explore search is opt-in per search (ADR 0078). Results are in
   means replacing the floor under a new ADR. Per-kind half-lives were built
   off by default (ADR 0072) and removed after a worse re-measure (ADR 0103). **Still open:** the value 0.8, from a synthetic fixture.
   **Re-measure trigger:** the first real corpus with meaningful age
-  spread; sweep 0.5–0.9 and expect to move the value, not the form.
+  spread; sweep 0.5 to 0.9 and expect to move the value, not the form.
   Tables and method:
   [docs/retrieval-experiments.md](docs/retrieval-experiments.md#46-the-form-of-the-recency-term-is-mismatched-to-rrfs-range).
 
@@ -409,7 +409,7 @@ Explore search is opt-in per search (ADR 0078). Results are in
   table (the read path gets an index, the entries keep HOT updates) or
   accepting slower merges (a new ADR restoring the index).
 
-## Tier 5 — explicitly held: the §10 extensions
+## Tier 5: explicitly held (the §10 extensions)
 
 **Do not build any SPEC §10 extension yet** (passive capture, private
 staging, namespaces, binary artifacts, knowledge graph, contradiction
@@ -424,30 +424,30 @@ so the later decision is data-driven. Two kinds:
 > **Scale ambition (updated).** The org's target has grown from the
 > ~50 agents in ADR 0007 to **300+ users/agents across multiple
 > fleets**. That still fits comfortably on one Postgres node + a small,
-> fixed app tier (a few writes/sec at peak, index-backed reads) — so the
+> fixed app tier (a few writes/sec at peak, index-backed reads), so the
 > *single-Postgres-node decision* in ADR 0007 holds; what changes is the
 > constant, not the decision. "Multiple fleets" is a logical partition
 > (`fleet_id` + trust-level visibility, ADR 0011), not a new
 > infrastructure. The infra question (Redis / scaling *for load*) only
-> opens when the **scale-out trigger** below fires — it is *not*
+> opens when the **scale-out trigger** below fires; it is *not*
 > triggered by 300 agents or by multiple fleets, and it is *not*
 > triggered by ADR 0026's replica count, which is an availability
 > decision that explicitly rejects throughput as a motive.
 
 | §10 extension | Trigger (spec wording) | Measure to watch | Instrument |
 |---|---|---|---|
-| Knowledge graph | "entity linking pays off in retrieval" | hit@k gap on entity-linked queries vs. plain hybrid *(the facet slice is pre-staged and shipped by ADR 0016 / SPEC §13 — see Tier 4.3; only the graph half of this row remains held)* | §1.1 harness |
+| Knowledge graph | "entity linking pays off in retrieval" | hit@k gap on entity-linked queries vs. plain hybrid *(the facet slice is pre-staged and shipped by ADR 0016 / SPEC §13, see Tier 4.3; only the graph half of this row remains held)* | §1.1 harness |
 | Per-agent retrieval tuning | "static decay stops beating per-agent profiles" | per-agent MRR/AUC vs. static model | §1.1 harness |
 | Passive capture | "agents forget to write" | high-value agent turns with no write; "should have remembered X" reports / wk; the empty-search rate per fleet *(counted since ADR 0056: `hivemind_searches_empty_total` / `hivemind_searches_total`)* | §3.3 counters |
-| Private staging | "try before sharing" | fraction of `self`-scoped entries later promoted to the fleet *(the `self` scope is now the staging space — ADR 0011; promotion is the curation story)* | §3.3 counters |
+| Private staging | "try before sharing" | fraction of `self`-scoped entries later promoted to the fleet *(the `self` scope is now the staging space, ADR 0011; promotion is the curation story)* | §3.3 counters |
 | Namespaces / channels | "flat pool too noisy" | result precision on scope-unspecified queries; count of distinct fleets in use *(partially satisfied by ADR 0011: single-fleet needs are covered; multi-fleet membership is the remaining extension)* | §3.3 counters |
 | Binary artifacts | "analyses outgrow file/URL refs" | count of `sources` with `type=file` or payload > threshold | §3.3 counters |
 | Contradiction detection | "explicit supersession can't keep up" | count of same-topic, conflicting-value entry pairs *not* linked by a supersession chain | §3.3 counters |
 | Curation workflow | "org wants a 'librarian'" | feedback (helpful/stale/wrong) accumulating without action; stale/wrong entries still in top-k *(the set is now listable: the `flagged` filter, ADR 0054)* | §3.3 counters + §1.1 harness |
 | Human read-only UI | "analysts want to see the pool" | direct demand for human browsing (usage signal, not a metric) | qualitative *(partially satisfied: the admin panel browses and searches the pool, ADR 0080; the agent portal shows one agent's view, ADR 0095; a UI without a key remains held)* |
 | Multi-tenant SaaS / OAuth | "more than one org; an org has an IdP" | count of distinct orgs / tenants requested (count > 1) | §3.3 counters |
-| Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(the replica clause is now satisfied — 2 replicas per runner, ADR 0026 — and still buys nothing: there is no distributed rate limiting, no fan-out, and the only cross-process lock is in Postgres (ADR 0020). The live half of this trigger is the **rate-limit ceiling**, not the replica count; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
-| Async embedding pipeline | "embedding latency/throughput starts blocking writes" | p95 write latency; embedder failure/retry rate; backlog of unembedded entries *(the embedder already has a bounded retry budget for transient failures — ADR 0014, `HIVEMIND_EMBEDDING_RETRIES`, default 2 — so this trigger is about the **fallback** (persist without a vector + catch-up), not retries. Design: a Postgres **outbox** — insert entry with `embedding IS NULL` in the same transaction, then a `FOR UPDATE SKIP LOCKED` worker embeds + updates; a single source of truth, no second queue service. New ADR required: it changes write semantics — an entry is vector-searchable only after its vector lands)* | §3.3 counters + p95 write latency |
+| Redis (cache / rate limits / queue) | "API scales to multiple replicas; org demands distributed rate limiting" | API replicas > 1, or distinct orgs > 1, or a cross-process per-agent rate-limit ceiling is needed *(the replica clause is now satisfied (2 replicas per runner, ADR 0026) and still buys nothing: there is no distributed rate limiting, no fan-out, and the only cross-process lock is in Postgres (ADR 0020). The live half of this trigger is the **rate-limit ceiling**, not the replica count; a Redis queue for embedding is superseded by the Postgres-outbox design below)* | §3.3 counters + replica count |
+| Async embedding pipeline | "embedding latency/throughput starts blocking writes" | p95 write latency; embedder failure/retry rate; backlog of unembedded entries *(the embedder already has a bounded retry budget for transient failures (ADR 0014, `HIVEMIND_EMBEDDING_RETRIES`, default 2), so this trigger is about the **fallback** (persist without a vector + catch-up), not retries. Design: a Postgres **outbox**: insert entry with `embedding IS NULL` in the same transaction, then a `FOR UPDATE SKIP LOCKED` worker embeds + updates; a single source of truth, no second queue service. New ADR required: it changes write semantics; an entry is vector-searchable only after its vector lands)* | §3.3 counters + p95 write latency |
 
 ## How to use this document
 
