@@ -217,7 +217,7 @@ signed out, but the agent itself is untouched. Ask the admin for a new
 key; replacing it also clears the lock. Until then the agent's tools
 answer `key_locked`.
 
-![The agent portal's home fleet page, with pinned memories and the fleet's latest memories](docs/images/portal-fleet.png)
+![The agent portal's home fleet page, with the fleet's writes per day stacked by agent and each agent's total](docs/images/portal-fleet.png)
 
 To try both apps on your computer, follow
 [Try it on your computer](#try-it-on-your-computer). To run them for your
