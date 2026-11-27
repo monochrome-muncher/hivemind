@@ -32,8 +32,8 @@ environment (checked in the extension source), so the key never needs to be
 written into the file. When the variables are unset the references stay
 unexpanded and the server never connects.
 
-**The `cline` CLI does not expand them** (checked with 3.0.73 and
-3.0.74): it rejects
+**The `cline` CLI does not expand them** (checked with 3.0.73,
+3.0.74 and 3.0.76): it rejects
 a `${env:…}` URL as invalid and skips the server (on 3.0.74 `cline config mcp` fails outright with `Invalid MCP settings … mcpServers.hivemind: Invalid input`, while a task still runs without the server), and sends a `${env:…}`
 header as written. So with this setup Hivemind stays off in the CLI and
 works in the extension. Do not work around it by writing the URL and key

@@ -7,7 +7,7 @@ back to "Which harness am I in?" in the hivemind-setup skill. Your system
 prompt says "You are Junie, an autonomous programmer developed by
 JetBrains".
 
-Checked with Junie CLI 26.9.7 and 26.11.1. Junie is young: check anything this file
+Checked with Junie CLI 26.9.7, 26.11.1 and 26.11.3. Junie is young: check anything this file
 does not state with `/extensions` (the Installed tab) and the MCP view in
 the Junie TUI rather than assuming.
 
@@ -126,7 +126,8 @@ Check that your guidelines show the `HIVEMIND:` line.
 `hivemind-incognito junie` sets `HIVEMIND_INCOGNITO=1`, starts Junie with
 `--mcp-default-locations=false` (it skips `~/.junie/mcp/mcp.json` and the
 project's MCP file, so the hand-written `hivemind` entry is never read and
-the plugin's own server cannot connect) and with
+the plugin's own server cannot connect: Junie still tries it and fails on
+the unexpanded `${HIVEMIND_MCP_URL}`, sending no key; checked with 26.11.3) and with
 `--ide-guidelines=<plugin>/junie/incognito.md` (the incognito text, since
 Junie ignores a `SessionStart` hook's output), and removes
 `HIVEMIND_API_KEY` and `HIVEMIND_MCP_URL` from its environment. Tell the
