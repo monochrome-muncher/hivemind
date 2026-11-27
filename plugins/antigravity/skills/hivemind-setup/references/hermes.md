@@ -91,3 +91,14 @@ server stays on in incognito sessions. For normal sessions leave it unset
 profile to silence it. The launcher leaves `HIVEMIND_API_KEY` in place
 (Hermes may still resolve it), so this session is incognito by the server
 being disabled, and the key is still in the environment.
+
+Hermes runs chat sessions inside a gateway daemon, one per Hermes home
+(per profile). The first session starts it, later sessions reuse it, and
+it keeps the environment of the launch that started it until it exits
+after being idle (10 minutes by default). So the launcher refuses to start
+while a gateway is running for the profile, because that session would not
+be incognito: run `hermes gateway stop` (or wait for the gateway to exit)
+and start it again. The reverse holds too: the gateway an incognito launch
+starts is reused by later normal sessions, which then stay incognito. Run
+`hermes gateway stop` after an incognito session to get Hivemind back at
+once.

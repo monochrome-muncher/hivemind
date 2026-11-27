@@ -100,7 +100,10 @@ writes is one its update file passes to the drift check.
   the description did so from 2.3.1 to 2.5.0). Checked with v2026.9.24:
   both skills register and the section renders. Hermes also loads
   `~/.hermes/.env` over the process environment, which matters for
-  incognito.
+  incognito. Since v0.23 sessions run inside a per-home gateway daemon
+  (`hermes gateway run --idle-exit`, 600 s idle by default) that keeps its
+  launch environment, so the launcher checks `gateway_state.json` and the
+  pid before it starts one.
 - **Pi** uses the built-in MCP client (Pi 0.99+): the extension registers
   the server with it, with direct exposure, unless a hand-written
   `hivemind` entry in `~/.pi/agent/mcp.json` takes precedence (Pi's rule).
@@ -630,7 +633,7 @@ does two things:
 | Claude Code | `--settings '{"deniedMcpServers":[…]}'` for this session, naming the server as `hivemind` and as the plugin-scoped `plugin:hivemind:hivemind`, and its URL (from the shell or the `env` block of `~/.claude/settings.json`); the launcher also unsets the key and URL. The scoped name or the URL is what blocks the plugin's server; `hivemind` alone covers only a hand-added one | nothing |
 | Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
-| Hermes | `HIVEMIND_ENABLED=false`; the launcher checks the root and the session's profile (`-p`/`--profile`, else the saved `active_profile`) | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml` or the profile's `config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` or the profile's `.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile |
+| Hermes | `HIVEMIND_ENABLED=false`; the launcher checks the root and the session's profile (`-p`/`--profile`, else the saved `active_profile`) | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml` or the profile's `config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` or the profile's `.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile. Hermes (v0.23+) runs sessions in a per-home gateway daemon that keeps the environment of the launch that started it, so the launcher refuses (exit 1) while the profile's `gateway_state.json` names a live pid in state `running`; after an incognito session `hermes gateway stop` lets normal sessions load Hivemind again |
 | Pi | the package registers no server, and the key and URL are unset; a hand-written `mcp.json` entry that reads `${HIVEMIND_MCP_URL}` has no URL. The extension also blocks `mcp__hivemind…` calls (codemode scripts included) and the Oh My Pi `xd://` routes | the hivemind package |
 | Oh My Pi | `HIVEMIND_API_KEY` unset and `HIVEMIND_MCP_URL=off` (not unset: Oh My Pi runs on Bun, which fills an unset or empty variable from the project's `.env`), so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |

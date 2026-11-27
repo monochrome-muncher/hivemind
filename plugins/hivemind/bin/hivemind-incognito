@@ -65,6 +65,19 @@ hermes_profile_dir() {
   esac
 }
 
+# The pid of a running Hermes gateway for the home $1, else nothing. The
+# gateway outlives the session that started it, and a state file can be
+# left behind by a dead one, so the pid is checked too.
+hermes_gateway_pid() {
+  state="$1/gateway_state.json"
+  [ -r "$state" ] || return 0
+  tr -d '\n' < "$state" | grep -Eq '"gateway_state"[[:space:]]*:[[:space:]]*"running"' || return 0
+  pid=$(tr -d '\n' < "$state" | grep -Eo '"pid"[[:space:]]*:[[:space:]]*[0-9]+' | head -n 1 | grep -Eo '[0-9]+$' || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "$pid"
+  fi
+}
+
 case "$(basename "$harness")" in
   claude)
     # Deny the server for this session only (--settings outranks user
@@ -171,6 +184,14 @@ PY
     # profile's own; both are checked.
     root="${HERMES_HOME:-${home_dir:-.}/.hermes}"
     profile_dir=$(hermes_profile_dir "$root" "$@")
+    # Hermes sessions run inside a per-home gateway daemon with the
+    # environment of the launch that started it, so a live one would keep
+    # Hivemind on. A gateway started here stays up until it is idle.
+    gateway_pid=$(hermes_gateway_pid "$profile_dir")
+    if [ -n "$gateway_pid" ]; then
+      note "a Hermes gateway is running for this profile (pid $gateway_pid); Hermes sessions run inside it with the environment it started with, so this session would not be incognito. Stop it with \`hermes gateway stop\` (or wait until it exits when idle) and run this again. A gateway started by an incognito session is reused by later normal sessions until it exits; \`hermes gateway stop\` brings Hivemind back at once."
+      exit 1
+    fi
     if ! grep -qs 'HIVEMIND_ENABLED' "$root/config.yaml" "$profile_dir/config.yaml"; then
       note "$profile_dir/config.yaml does not gate the hivemind server on \${HIVEMIND_ENABLED}; the tools may still load (see the plugin README, Incognito sessions)"
     fi
