@@ -44,7 +44,7 @@ There is one method per tool: `whoami` (as `refresh_whoami`), `search`, `get`, `
 
 ## A loop with the Anthropic Messages API
 
-`instructions()` is the system prompt, `anthropic_tools()` the tool list, and `run_tool()` runs what the model asked for. When the model stops calling tools, the loop sends the end-of-task reminder once and lets the model answer it.
+`instructions()` is the system prompt, `anthropic_tools()` the tool list, and the conversation's `run_tool()` runs what the model asked for. When the model stops calling tools, the loop asks the conversation whether the end-of-task reminder is due, and if so sends it and lets the model answer it.
 
 ```python
 import asyncio
@@ -56,8 +56,8 @@ from hivemind_memory import Hivemind
 async def run(task: str) -> None:
     model = anthropic.AsyncAnthropic()
     async with Hivemind.connect() as hive:
+        conversation = hive.conversation()
         messages = [{"role": "user", "content": task}]
-        reminded = False
         while True:
             reply = await model.messages.create(
                 model="claude-sonnet-5-5",
@@ -69,16 +69,16 @@ async def run(task: str) -> None:
             messages.append({"role": "assistant", "content": reply.content})
             calls = [block for block in reply.content if block.type == "tool_use"]
             if not calls:
-                if reminded:
+                reminder = conversation.reminder_due()
+                if reminder is None:
                     return
-                messages.append({"role": "user", "content": hive.reminder()})
-                reminded = True
+                messages.append({"role": "user", "content": reminder})
                 continue
             results = [
                 {
                     "type": "tool_result",
                     "tool_use_id": call.id,
-                    "content": await hive.run_tool(call.name, call.input),
+                    "content": await conversation.run_tool(call.name, call.input),
                 }
                 for call in calls
             ]
@@ -88,13 +88,19 @@ async def run(task: str) -> None:
 asyncio.run(run("Find out how the billing service deploys."))
 ```
 
-`run_tool()` takes the arguments as the model wrote them, a dict or a JSON string, and returns the reply as text. A refusal comes back as text too, for example `{"error": {"code": "not_found", ...}}`, so the model sees the code and can react. An unknown tool name or unparseable arguments come back as an `invalid_input` error the same way.
+`run_tool()` (on the conversation or on `hive`) takes the arguments as the model wrote them, a dict or a JSON string, and returns the reply as text. A refusal comes back as text too, for example `{"error": {"code": "not_found", ...}}`, so the model sees the code and can react. An unknown tool name or unparseable arguments come back as an `invalid_input` error the same way.
 
 `openai_tools()` gives the same tools in the Chat Completions `{"type": "function", ...}` format.
 
 ## The end-of-task reminder
 
-When a task ends, send `hive.reminder()` to the model as one more user turn, once, and let it make its last tool calls, as the loop above does. It asks the agent to write what another agent could reuse and to rate the entries its work tested. `hivemind_memory.REMINDER` is the same text as a constant.
+The reminder asks the agent to write what another agent could reuse and to rate the entries its work tested. Send it as one more user turn when a task ends and let the agent make its last tool calls, as the loop above does, but only when `reminder_due()` returns it. It follows the plugin's Stop hook: once per conversation, after at least 20 tool calls (set `HIVEMIND_STOP_MIN_TOOLS`, or `hive.conversation(min_tool_calls=...)`), and only if the agent rated nothing yet and either wrote nothing or read entries. So a short question costs no extra turn, and an agent that already rated is not asked again.
+
+Start one `hive.conversation()` per conversation. Run the Hivemind tools through its `run_tool()`, and call `conversation.count_tool_call(name, call_id)` for every other tool call your agent makes, so the count is the whole conversation's; a call id counted before is not counted again. `hive.reminder()` and `hivemind_memory.REMINDER` are the text alone.
+
+## After compaction
+
+If your app compacts or summarizes a conversation's context, add `hive.after_compaction()` (`hivemind_memory.COMPACTED`) to the next system prompt or user turn. It asks the agent to write and rate what it learned before the detail is lost, as the plugin does after a compaction.
 
 ## LangChain and LangGraph
 
@@ -108,6 +114,22 @@ async with Hivemind.connect() as hive:
 ```
 
 The tools work in a LangChain agent and in LangGraph. They are async only, so call them with `ainvoke` or run them in an async agent; `invoke` raises `NotImplementedError`. Like `run_tool()`, they return refusals as text.
+
+For the end-of-task reminder, run the agent through `ainvoke_with_reminder`. It runs the agent, counts every tool call in its messages once by its id (so a checkpointer that returns the whole thread is fine), and if the reminder is due, runs it once more with the reminder as the next message. It works with any agent whose state holds `messages`, such as LangChain's `create_agent` and LangGraph graphs.
+
+```python
+from langchain.agents import create_agent
+from hivemind_memory.langchain import ainvoke_with_reminder
+
+conversation = hive.conversation()
+agent = create_agent(
+    model,
+    tools=[*langchain_tools(hive), *my_tools],
+    system_prompt=hive.instructions(),
+)
+state, reminded = await ainvoke_with_reminder(conversation, agent, {"messages": [("user", task)]})
+answer = state["messages"][-1].content  # reminded is None, or the state after the reminder
+```
 
 ## Other frameworks
 

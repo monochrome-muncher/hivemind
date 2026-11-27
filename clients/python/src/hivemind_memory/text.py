@@ -1,4 +1,5 @@
-"""The texts shipped with the package: the agent instructions and the end-of-task reminder."""
+"""The texts shipped with the package: the agent instructions, the end-of-task reminder and the
+line for after a compaction."""
 
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ def skill_body() -> str:
 
 
 REMINDER = _read("reminder.txt")
+COMPACTED = _read("compacted.txt")
 
 
 INSTRUCTIONS = f"{_read('instructions.txt')}\n\n{skill_body()}"

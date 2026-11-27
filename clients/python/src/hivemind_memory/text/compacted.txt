@@ -1,0 +1,1 @@
+Context was just compacted: before continuing, write now (hive_write) anything learned earlier that another agent could reuse, and rate the entries your work tested (hive_feedback).

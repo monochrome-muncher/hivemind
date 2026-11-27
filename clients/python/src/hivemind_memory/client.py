@@ -16,6 +16,7 @@ from mcp.types import Implementation, TextContent
 
 from hivemind_memory import text
 from hivemind_memory._version import __version__
+from hivemind_memory.conversation import Conversation
 from hivemind_memory.errors import AUTH_CODES, AuthenticationError, HivemindError
 from hivemind_memory.formats import ToolDefinitions, ToolSpecs, anthropic_tools, openai_tools
 from hivemind_memory.replies import (
@@ -279,8 +280,16 @@ class Hivemind:
         return text.INSTRUCTIONS
 
     def reminder(self) -> str:
-        """The end-of-task text: send it once as a user turn when a task ends."""
+        """The end-of-task text. :meth:`Conversation.reminder_due` says when to send it."""
         return text.REMINDER
+
+    def after_compaction(self) -> str:
+        """The line to add after the app compacts or summarizes a conversation's context."""
+        return text.COMPACTED
+
+    def conversation(self, *, min_tool_calls: int | None = None) -> Conversation:
+        """Start counting a new conversation's tool calls, for the end-of-task reminder."""
+        return Conversation(self, min_tool_calls)
 
     def anthropic_tools(self) -> ToolSpecs:
         return anthropic_tools(self.tools)

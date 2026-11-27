@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Protocol
 
 try:
-    from langchain_core.messages import SystemMessage
+    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
     from langchain_core.tools import BaseTool, StructuredTool
 except ImportError as exc:
     raise ImportError(
@@ -13,7 +14,16 @@ except ImportError as exc:
     ) from exc
 
 from hivemind_memory.client import Hivemind
+from hivemind_memory.conversation import Conversation
 from hivemind_memory.formats import ToolDefinition
+
+AgentState = dict[str, Any]
+
+
+class MessagesAgent(Protocol):
+    """An agent whose state carries ``messages``: LangChain's ``create_agent``, LangGraph's graphs."""
+
+    async def ainvoke(self, input: AgentState, /, *args: Any, **kwargs: Any) -> AgentState: ...
 
 
 def langchain_tools(hive: Hivemind) -> list[BaseTool]:
@@ -23,6 +33,35 @@ def langchain_tools(hive: Hivemind) -> list[BaseTool]:
 
 def system_message(hive: Hivemind) -> SystemMessage:
     return SystemMessage(content=hive.instructions())
+
+
+async def ainvoke_with_reminder(
+    conversation: Conversation, agent: MessagesAgent, input: AgentState, **kwargs: Any
+) -> tuple[AgentState, AgentState | None]:
+    """Run the agent; if the end-of-task reminder is due, run it once more with the reminder.
+
+    Every tool call in the agent's messages is counted once, by its id, so a checkpointer that
+    returns the whole thread does not count earlier turns again. Returns the task's state and the
+    reminder run's state, or ``None`` when no reminder was due.
+    """
+    state = await agent.ainvoke(input, **kwargs)
+    _count_tool_calls(conversation, state)
+    reminder = conversation.reminder_due()
+    if reminder is None:
+        return state, None
+    history: Sequence[BaseMessage] = state["messages"]
+    reminded = await agent.ainvoke(
+        {**state, "messages": [*history, HumanMessage(content=reminder)]}, **kwargs
+    )
+    _count_tool_calls(conversation, reminded)
+    return state, reminded
+
+
+def _count_tool_calls(conversation: Conversation, state: Mapping[str, Any]) -> None:
+    for message in state.get("messages", []):
+        if isinstance(message, AIMessage):
+            for call in message.tool_calls:
+                conversation.count_tool_call(call["name"], call.get("id"))
 
 
 def _tool(hive: Hivemind, definition: ToolDefinition) -> BaseTool:
