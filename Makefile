@@ -218,7 +218,7 @@ hermes-scan: ## Run Hermes's install scan over the plugin and fail if Hermes wou
 	python3 -I scripts/hermes-scan.py $(HERMES_SOURCE) plugins/hivemind
 
 .PHONY: sync-client-text
-sync-client-text: ## Copy the hivemind skill, without its plugin-only lines, and the Stop hook's reminder into the hivemind-memory packages (a unit test checks the copies)
+sync-client-text: ## Copy the server instructions and the hivemind skill, without their plugin-only lines, and the Stop hook's reminder into the hivemind-memory packages (a unit test checks the copies)
 	uv run python clients/sync_text.py
 
 .PHONY: sync-antigravity-skills

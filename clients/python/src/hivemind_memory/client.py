@@ -275,9 +275,8 @@ class Hivemind:
         return await self._call_text(name, parsed)
 
     def instructions(self) -> str:
-        """The server's instructions, then the ``hivemind`` skill: the system prompt for an agent."""
-        server = self._client.instructions or ""
-        return f"{server}\n\n{text.skill_body()}" if server else text.skill_body()
+        """The system prompt for an agent: the server's instructions, then the ``hivemind`` skill."""
+        return text.INSTRUCTIONS
 
     def reminder(self) -> str:
         """The end-of-task text: send it once as a user turn when a task ends."""

@@ -1,17 +1,20 @@
-"""Copy the plugin's `hivemind` skill and Stop reminder into the hivemind-memory packages.
+"""Copy the server instructions, the plugin's `hivemind` skill and its Stop reminder into the
+hivemind-memory packages.
 
 Run from the repository root: ``make sync-client-text``.
 
 An app built on the packages has no plugin, no hivemind-setup skill and no incognito launcher,
-so the skill copy drops the lines about them (ADR 0163). Each replaced passage must appear in the
-plugin's skill exactly once: when the skill changes under one, this script fails rather than ship
-a copy that still names the plugin.
+so the copies drop or reword the lines about them (ADRs 0163, 0168). Each replaced passage must
+appear in its source exactly once: when the source changes under one, this script fails rather
+than ship a copy that still names the plugin.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+
+from hivemind.mcp.contract import INSTRUCTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "plugins" / "hivemind" / "skills" / "hivemind" / "SKILL.md"
@@ -24,6 +27,13 @@ TEXT_DIRS = (
 )
 
 PLUGIN_ONLY = "\n## 6. Incognito sessions\n"
+
+SERVER_SETUP_CLAUSE = (
+    "you are not registered yet or await activation: follow the hivemind-setup skill "
+    "(hive_register needs a name and owner alias from your user). ",
+    "this is not an agent key, or the agent awaits activation: tell your user that the app "
+    "needs an activated agent key. ",
+)
 
 APP_WORDING = (
     (
@@ -73,6 +83,16 @@ def client_skill(skill: str) -> str:
     return text
 
 
+def client_instructions(server: str) -> str:
+    """The server instructions as the packages ship them: without the setup skill's name."""
+    plugin, app = SERVER_SETUP_CLAUSE
+    if server.count(plugin) != 1:
+        raise ValueError(
+            f"the server instructions no longer have, exactly once: {plugin[:60]!r}..."
+        )
+    return server.replace(plugin, app)
+
+
 def reminder() -> str:
     match = re.search(r"^text='([^']*)'$", STOP_HOOK.read_text(), re.MULTILINE)
     if match is None:
@@ -83,6 +103,7 @@ def reminder() -> str:
 def main() -> None:
     skill = client_skill(SKILL.read_text())
     for text_dir in TEXT_DIRS:
+        (text_dir / "instructions.txt").write_text(client_instructions(INSTRUCTIONS))
         (text_dir / "skill.md").write_text(skill)
         (text_dir / "reminder.txt").write_text(reminder())
 

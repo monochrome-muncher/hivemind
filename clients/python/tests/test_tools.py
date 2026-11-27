@@ -8,7 +8,7 @@ import pytest
 import hivemind_memory
 from hivemind_memory import AuthenticationError, HivemindError
 from hivemind_memory.text import skill_body
-from tests.conftest import SERVER_INSTRUCTIONS, Connected
+from tests.conftest import Connected
 
 
 async def test_call_returns_the_parsed_reply(connected: Connected) -> None:
@@ -148,15 +148,16 @@ async def test_whoami_can_be_refreshed(connected: Connected) -> None:
         assert hive.whoami["name"] == "fake-agent"
 
 
-async def test_instructions_are_the_server_text_then_the_skill_without_front_matter(
+async def test_instructions_are_the_shipped_server_text_then_the_skill_without_front_matter(
     connected: Connected,
 ) -> None:
     async with connected() as hive:
         text = hive.instructions()
-        assert text.startswith(SERVER_INSTRUCTIONS + "\n\n")
-        assert text.endswith(skill_body())
-        assert not skill_body().startswith("---")
+        assert text is hivemind_memory.INSTRUCTIONS
+        assert text.startswith("Hivemind is this organization's shared long-term memory")
+        assert text.endswith("\n\n" + skill_body())
         assert "name: hivemind" not in text
+        assert "hivemind-setup" not in text
         assert skill_body().startswith("# Hivemind")
 
 

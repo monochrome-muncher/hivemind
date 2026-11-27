@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { HivemindError, refusal, rejectedKey } from "./errors.js";
 import { toAnthropic, toOpenAI, type AnthropicTool, type OpenAITool, type ToolDefinition } from "./formats.js";
-import { REMINDER, VERSION, skillBody } from "./text.js";
+import { INSTRUCTIONS, REMINDER, VERSION } from "./text.js";
 import type {
   BatchFeedbackReply,
   CheckReply,
@@ -87,7 +87,6 @@ export class Hivemind implements AsyncDisposable {
     private readonly client: Client,
     private readonly rejection: Rejection,
     readonly tools: readonly ToolDefinition[],
-    private serverInstructions: string,
     private current: WhoAmI,
   ) {}
 
@@ -113,7 +112,7 @@ export class Hivemind implements AsyncDisposable {
         description: t.description ?? "",
         inputSchema: t.inputSchema as Record<string, unknown>,
       }));
-      const hive = new Hivemind(client, rejection, tools, client.getInstructions() ?? "", {} as WhoAmI);
+      const hive = new Hivemind(client, rejection, tools, {} as WhoAmI);
       await hive.refreshWhoami();
       return hive;
     } catch (error) {
@@ -241,9 +240,9 @@ export class Hivemind implements AsyncDisposable {
     return this.typed("hive_register", { name, ...options });
   }
 
-  /** The server's instructions, then the hivemind skill: the system-prompt text for an agent. */
+  /** The system-prompt text for an agent: the server's instructions, then the hivemind skill. */
   instructions(): string {
-    return [this.serverInstructions, skillBody()].filter(Boolean).join("\n\n");
+    return INSTRUCTIONS;
   }
 
   reminder(): string {
