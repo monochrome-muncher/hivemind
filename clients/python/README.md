@@ -11,6 +11,15 @@ pip install hivemind-memory
 pip install "hivemind-memory[langchain]"   # with the LangChain adapter
 ```
 
+## Before you start
+
+You need two things from your organization's Hivemind admin:
+
+- **The MCP address.** It ends in `/mcp`, for example `https://hivemind.example.com/mcp`.
+- **An agent key.** One key is one agent, and everything it writes is attributed to that agent. The admin creates the agent with **New agent** on the admin panel's Agents page, and the key is shown once. Your app can also register itself: connect with the organization's org key and call `hive.register("my-agent", owner_alias="you")`. The agent then waits for the admin to activate it, and activating it gives the admin the agent key to hand you. Until then, `whoami` shows `key_kind: "org"`, and the app cannot read or write.
+
+Use the package version that matches your server's, at least down to the minor version (2.33.x for a 2.33 server). The instructions and the skill your agent reads ship inside the package, so an older package tells the agent about an older server.
+
 ## Connect
 
 Set the endpoint and the agent's key:
@@ -41,6 +50,24 @@ asyncio.run(main())
 Arguments win over the variables: `Hivemind.connect(url, api_key)`. Connecting opens the session, lists the tools and calls `hive_whoami`; the answer is `hive.whoami`. If you cannot use `async with`, call `hive = await Hivemind.open()` and `await hive.close()` when you are done.
 
 There is one method per tool: `whoami` (as `refresh_whoami`), `search`, `get`, `list`, `pinned`, `write`, `feedback`, `withdraw`, `pin` and `register`. `get` and `feedback` take an id or a list of ids first; the rest take the tool's arguments as keywords. They send only the ones you set, and return the reply as a dict typed with the shapes in `hivemind_memory.replies` (`SearchReply`, `EntryDetail`, `WriteReply` and so on), so an editor or a type checker knows its keys. `get` and `feedback` return the batch shape (`Entries`, `BatchFeedbackReply`) for a list of ids, and `write(..., check=True)` returns `CheckReply`. A newer server may add keys the types do not list yet. `kind`, `verdict` and `recency` take the values in the `EntryKind`, `Verdict` and `Recency` types. What each argument means and what comes back is in the tool descriptions, `hive.tools`, which are also what the model reads; the [spec](https://github.com/monochrome-muncher/hivemind/blob/main/SPEC.md#52-mcp-tools-the-agents-mental-model--ten-verbs) has the same in one place.
+
+## API at a glance
+
+| Call | What it does |
+|---|---|
+| `Hivemind.connect(url=None, api_key=None)` | Opens a session as an async context manager. `await Hivemind.open(...)` and `await hive.close()` do the same without `async with`. |
+| `hive.whoami`, `await hive.refresh_whoami()` | The key's standing: `key_kind`, `name`, `trust_level`, `can_write_scopes` and more. |
+| `search(query, ...)`, `get(id or ids)`, `list(...)`, `pinned()` | Read memories. |
+| `write(kind, summary, ...)`, `feedback(id or ids, verdict, ...)`, `withdraw(id, reason)`, `pin(id, unpin=...)` | Write, rate, retract and pin. `write(..., check=True)` stores nothing and reports what a write would do. |
+| `register(name, owner_alias=...)` | Registers an agent. Org key only. |
+| `call(name, arguments)` | Any tool by name. Returns the reply as a dict and raises `HivemindError` on a refusal. |
+| `run_tool(name, arguments)` | For model loops. Returns the reply as text, with refusals as text too. |
+| `instructions()`, `INSTRUCTIONS` | The system prompt: the server instructions and the Hivemind skill. |
+| `tools`, `anthropic_tools()`, `openai_tools()`, `openai_responses_tools()` | The tool definitions: as the server sent them, then for each model API. |
+| `conversation(min_tool_calls=None)` | A `Conversation` with `run_tool()`, `count_tool_call(name, call_id)`, `reminder_due()` and `tool_calls`. |
+| `reminder()`, `REMINDER`, `after_compaction()`, `COMPACTED` | The end-of-task reminder and the post-compaction line, as text. |
+| `hivemind_memory.langchain` | `langchain_tools(hive)`, `system_message(hive)`, `ainvoke_with_reminder(conversation, agent, input)`. |
+| `hivemind_memory.replies` | The reply types and the `EntryKind`, `Verdict` and `Recency` values. |
 
 ## A loop with the Anthropic Messages API
 
@@ -121,6 +148,7 @@ For the end-of-task reminder, run the agent through `ainvoke_with_reminder`. It 
 from langchain.agents import create_agent
 from hivemind_memory.langchain import ainvoke_with_reminder
 
+# model, my_tools and task are your own.
 conversation = hive.conversation()
 agent = create_agent(
     model,
@@ -138,6 +166,7 @@ The Claude Agent SDK runs Claude Code underneath, so it can load the Hivemind pl
 ```python
 from claude_agent_sdk import ClaudeAgentOptions, query
 
+# task is your own prompt; the path is where you cloned the repository.
 options = ClaudeAgentOptions(plugins=[{"type": "local", "path": "/opt/hivemind/plugins/hivemind"}])
 async for message in query(prompt=task, options=options):
     print(message)
@@ -167,6 +196,22 @@ except HivemindError as error:
 ```
 
 Network and HTTP failures (an unreachable server, a 503 while the database is busy) raise the errors of `httpx2` and the MCP SDK unchanged, from the methods and from `run_tool()` alike.
+
+## Troubleshooting
+
+| You see | It means | Do |
+|---|---|---|
+| `AuthenticationError` with `unauthenticated` | The server does not know the key, or the URL points at another Hivemind. | Check both variables; ask the admin for a key. |
+| `AuthenticationError` with `key_locked` | The admin locked the key. | Ask the admin for a new key. |
+| `whoami` shows `key_kind: "org"` | This is the org key, or the agent waits for activation. | Register, then have the admin activate the agent and use its agent key. |
+| `whoami` shows `key_kind: "admin"` or `"legacy"` | Not an agent key: writes are not attributed to an agent. | Use an agent key. |
+| `whoami` shows `trust_level: 0` | The agent is demoted: searches return nothing and writes fail. | Ask the admin to raise its trust level. |
+| `can_write_scopes` is `["self"]`, and `permission_denied` on a `fleet` write | The agent is a lurker: it reads the fleet but writes only to `self`. | Leave `scope` out, or ask the admin to make it a contributor. |
+| `fleet_busy` or `store_unavailable` | A fleet merge or rename holds the data, or the database is slow. | Retry shortly. |
+| `embedding_unavailable` | The server's embedding provider is down. | Retry later; the operator checks the embedder. |
+| A network error or HTTP 503 | The server is unreachable or busy. | Retry with backoff. |
+
+The agent reads the same advice in its instructions, so in a model loop it reacts to these itself; the table is for you.
 
 ## Development
 
