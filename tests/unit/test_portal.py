@@ -480,6 +480,15 @@ def test_the_portal_memory_and_search_pages_take_the_shared_filters() -> None:
     assert "since.js" in SHARED_MODULES
 
 
+def test_the_home_fleet_filters_and_counts_its_unverified_memories() -> None:
+    """ADR 0156: the fleet memories take the "Unverified only" filter, and the
+    count beside it is one capped list read, never the admin-only metrics."""
+    views = (STATIC_DIR / "views.js").read_text()
+    assert 'id: "f-unverified"' in views
+    assert 'fleetMemories({ unverified: "true", limit: PORTAL_LIMIT })' in views
+    assert "metrics" not in views
+
+
 def test_the_home_fleet_keeps_the_last_visit_per_agent_and_marks_what_is_new() -> None:
     views = (STATIC_DIR / "views.js").read_text()
     assert "hivemind.portal.lastSeen.${me.name}" in views

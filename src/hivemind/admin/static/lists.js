@@ -57,7 +57,7 @@ export function pagedTable({ headers, className = "entries", fetchPage, renderRo
       offset += rows.length;
       shown += rows.length;
       tbody.append(...rows.flatMap(renderRow));
-      if (shown === 0) tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: headers.length, text: emptyText })));
+      if (shown === 0) tbody.replaceChildren(h("tr", {}, h("td", { class: "empty", colspan: headers.length, text: typeof emptyText === "function" ? emptyText() : emptyText })));
       status.textContent = statusText(shown);
       moreWrap.hidden = rows.length < PAGE;
     } catch (err) {

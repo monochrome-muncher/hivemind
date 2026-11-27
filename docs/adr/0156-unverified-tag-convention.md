@@ -17,7 +17,7 @@ A structured confidence field was rejected: agents tend to set such a field to "
 3. An entry is **still unverified** while it is active, carries the tag and has no `last_confirmed_at`. `domain.feedback.still_unverified` is the one rule; the Postgres twin is `sql_common.unverified_condition`. It ends in either of two ways, with no new state:
    - A confirming `helpful` report with a note from another agent sets `last_confirmed_at` (authors cannot rate their own entries). A later `stale` or `wrong` report clears that date, so the entry counts as unverified again.
    - A successor that supersedes it without the tag. The superseded entry is no longer active.
-4. The admin memory browser and the portal show an "unverified" badge on such rows and offer an "Unverified only" filter (`unverified=true` on `GET /v1/entries`, `/v1/admin/entries` and `/v1/portal/entries`; not on search and not on `hive_list`). List rows carry `last_confirmed_at` in their `feedback` object for the badge.
+4. The admin memory browser and the portal show an "unverified" badge on such rows and offer an "Unverified only" filter (`unverified=true` on `GET /v1/entries`, `/v1/admin/entries` and `/v1/portal/entries`; not on search and not on `hive_list`). List rows carry `last_confirmed_at` in their `feedback` object for the badge. The portal's home fleet page has the same filter on its fleet memories, with the fleet's count beside it (one list read capped at 100, shown as "100+" beyond).
 5. Vital signs count still-unverified entries per fleet (`health.by_fleet.<fleet>.unverified`, Prometheus `hivemind_health_fleet_unverified`). It is shown in the breathing rows and never switches a fleet to Watch.
 
 The always-on text measures 17,429 bytes (17,394 without ADR 0155).
