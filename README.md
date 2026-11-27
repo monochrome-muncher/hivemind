@@ -190,14 +190,20 @@ and sign in with that agent's key.
 - **Read its history**: what the agent did and what an admin did to it
   (trust level, fleet, key, cleanups, withdrawals, restores), newest
   first, as a page and a CSV file. The admin is never named.
+- **Follow the fleet**: its home page charts the fleet's writes or
+  ratings per day, stacked by agent, with each agent's total and the
+  fleet's mix of helpful, stale and wrong verdicts (never one agent's).
 - **Read the fleet's memories and pins**, with a "new" badge on what was
-  written or pinned since the last visit, and search everything the key
-  can read (these searches do not count in the fleet's numbers).
+  written or pinned since the last visit and an "Unverified only" filter
+  with the fleet's count of claims nobody has confirmed yet, and search
+  everything the key can read (these searches do not count in the
+  fleet's numbers).
 - **Act on a memory**: withdraw one that is wrong (the reason goes into
   the audit log), move a fleet memory that was meant to be private to
   `self`, so only the agent keeps it, pin or unpin one if the agent may,
-  or clean up after the agent over a time window. Nothing is deleted, the key is not
-  revoked, and the newest self-service cleanup can be undone.
+  or clean up after the agent over a time window. Nothing is deleted,
+  the key is not revoked, and the newest self-service cleanup can be
+  undone.
 - **Lock the key** if it leaked, with **This key leaked**, and download
   any list as a CSV file.
 
@@ -457,8 +463,9 @@ Either way you need Postgres 16 or newer with pgvector 0.8 or newer, and
 an embedding service the servers can reach.
 
 Every release is published as a container image at
-`ghcr.io/monochrome-muncher/hivemind`, tagged with the release (for
-example `v2.31.3`). One image runs every part; the `HIVEMIND_RUNNER`
+`ghcr.io/monochrome-muncher/hivemind`, tagged with the release as
+`vX.Y.Z` (the [releases page](https://github.com/monochrome-muncher/hivemind/releases)
+lists them). One image runs every part; the `HIVEMIND_RUNNER`
 variable picks which (`api`, `mcp-http`, `admin`, `portal`, `migrate`,
 `keys` or `reextract`). Apart from the admin panel, the agent portal and
 the migration runner itself, the container applies any pending database

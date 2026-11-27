@@ -337,6 +337,14 @@ _Avoid_: dashboard, console, admin UI (fine informally; the term is admin panel)
 The browser front end for the person behind an agent, run as its own runner (`hivemind-portal`) that talks only to `hivemind-api`. You sign in with one agent's key (never the admin or org key) and see what that agent wrote, the verdicts it gave and received, which of its active memories carry a stale or wrong verdict, its home fleet's memories and pins, and a search over what the key can read; you can withdraw the agent's own memories, or move its fleet memories to self, with a reason, and pin and unpin as the agent with the same rights and caps as `hive_pin`; both are audited as coming from the portal (ADRs 0095, 0116). You can also lock the agent's key if it leaked (ADR 0117), clean up the agent's own work with undo (ADR 0118) and read its history (ADR 0123). One key at a time. It reads nothing the key could not already read through the API.
 _Avoid_: user app, user portal, agent dashboard (there are no user accounts; it is the agent's key that signs in)
 
+**Fleet activity**:
+The agent portal's home-page chart of the key's home fleet: writes or ratings per UTC day as bars stacked by agent, each agent's total in name order, and in ratings mode the fleet's helpful, stale and wrong mix, never one agent's (ADRs 0165, 0167).
+_Avoid_: leaderboard, ranking, productivity (agents are listed by name, never by count)
+
+**Client package**:
+`hivemind-memory`, the Python (PyPI) and TypeScript (npm) package for an agent built outside the supported harnesses: an MCP client of the hostable runner with the tools, the server instructions plus the `hivemind` skill, and the end-of-task reminder (ADRs 0162 to 0164).
+_Avoid_: SDK, plugin (the plugin is for the supported harnesses), Hivemind client (fine informally; the term is client package)
+
 **Per-request credential**:
 The acting identity a hostable `hivemind-mcp-http` process resolves **per HTTP request**: the request presents an agent key (ADR 0012), a thin ASGI middleware verifies it against the `credentials` table (ADR 0012), and the shared, stateless services are re-bound to that credential on every tool dispatch. Because it is resolved per request, revocation is immediate (ADR 0010).
 _Avoid_: agent key (that is the credential itself; this term is the per-request resolution of it), session identity
@@ -446,7 +454,7 @@ The local Hivemind kept standing while development happens against the test pool
 _Avoid_: dev pool (that is the one the tests wipe), production (a standalone pool is local, not deployed)
 
 **Replica**:
-One interchangeable process of a runner's Deployment (`hivemind-api` or `hivemind-mcp-http`) — 2 of each in production, for availability (ADR 0026). All replicas of an instance share one pool and serve one organization, so a second replica is **not** a second instance and adds no organization.
+One interchangeable process of a runner's Deployment (`hivemind-api`, `hivemind-mcp-http` or `hivemind-portal`): 2 of each in production, for availability (ADR 0026). All replicas of an instance share one pool and serve one organization, so a second replica is **not** a second instance and adds no organization.
 _Avoid_: instance (that is the whole deployment, and one organization), node (that is the machine), shard, read replica (there is no read/write split)
 
 **Migration**:
@@ -487,6 +495,10 @@ _Avoid_: metrics endpoint (ambiguous with `GET /v1/metrics`)
 **Input bounds**:
 The limits every surface applies to a request before any provider or store call: field sizes, `limit` / `offset`, payload depth, the request-body size, and no NUL or lone-surrogate characters (ADR 0040).
 _Avoid_: rate limits (none exist in the app), quotas
+
+**Tool refusal**:
+An MCP tool reply with an error code the caller can act on (`permission_denied`, `not_found`, `invalid_input`, `fleet_busy`, ...), as opposed to a **tool failure**, which is server-side (`store_unavailable`, `embedding_unavailable`, or a raise). The tool-call counter's `code` label tells them apart (ADR 0161).
+_Avoid_: tool error (it covers both), outage (a refusal is not one)
 
 **Provider deadline**:
 The overall time one embedder or extractor call may take, retries and backoff included; unset, it is derived from that provider's timeout and retry settings (ADR 0041).

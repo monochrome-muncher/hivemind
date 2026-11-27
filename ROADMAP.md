@@ -70,12 +70,15 @@ The SPEC §10 extensions (Tier 5) stay held until their triggers fire.
   after their measurement passes with the deployment's embedder.
 - **Dropped ideas**: a `question` entry kind was considered and dropped. The
   legacy `pi-mcp-adapter` route in the Pi plugin was dropped once Pi's
-  built-in MCP (0.99+) became the norm (2.16.0). Agent key switching is
-  parked ([docs/proposals/2026-10-12-agent-key-switching.md](docs/proposals/2026-10-12-agent-key-switching.md)).
+  built-in MCP (0.99+) became the norm (2.16.0). Server-side agent key
+  switching ([docs/proposals/2026-10-12-agent-key-switching.md](docs/proposals/2026-10-12-agent-key-switching.md))
+  was not built; key profiles on the client replaced it in 2.26.0
+  ([ADR 0150](docs/adr/0150-key-profiles-on-the-client.md)).
 - **Discovery and learning ideas** ([docs/proposals/2026-10-20-discovery-and-learning-ideas.md](docs/proposals/2026-10-20-discovery-and-learning-ideas.md)):
-  a re-check queue and a librarian skill, searchable tags, a tag
-  directory, "used together" trails and an ambient-recall pilot, kept as
-  candidates; its first three ideas shipped in 2.11.0 (ADRs 0097–0099).
+  its first three ideas shipped in 2.11.0 (ADRs 0097 to 0099). Idea 4,
+  "the librarian idea" (a re-check queue and a librarian skill), is
+  parked. Searchable tags, a tag directory, "used together" trails and an
+  ambient-recall pilot are kept as candidates.
 - **The hive-mind study** ([docs/proposals/2026-10-10-hive-mind-ideas.md](docs/proposals/2026-10-10-hive-mind-ideas.md)):
   ideas for distillation, ranking evidence and sharing without
   converging, with each item's status. Its unbuilt items are candidates,
