@@ -203,9 +203,9 @@ measure-experiments: ## Re-run the settled decay, recency-floor and rrf_k experi
 	$(TEST_ENV) $(PYTEST) tests/eval/test_decay_experiment.py tests/eval/test_rrf_k_experiment.py -m measurement -s
 
 # Hermes's install scan blocks a plugin it rates dangerous, even with --force.
-# The pin is Hermes v0.23.3; move it to each new Hermes release.
+# The pin is Hermes v0.23.4; move it to each new Hermes release.
 HERMES_REPO ?= https://github.com/NousResearch/hermes-agent
-HERMES_REF ?= caafe5389ae585ef77387a962aee05b1bcf17029
+HERMES_REF ?= 8fc0374447313e276f6b9a2764bfc750190c966a
 HERMES_SOURCE ?= .cache/hermes-agent
 
 .PHONY: hermes-scan
