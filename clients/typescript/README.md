@@ -72,7 +72,7 @@ async function run(task: string): Promise<void> {
 await run("Find out when the staging database is reset.");
 ```
 
-`runTool` returns the reply as JSON text and never throws on an error reply, so the model sees the refusal and can react. `openaiTools()` gives the same tools in the OpenAI function-calling shape. Neither needs the Anthropic or OpenAI package.
+`runTool` returns the reply as JSON text and never throws on an error reply, so the model sees the refusal and can react. `openaiTools()` gives the same tools in the OpenAI Chat Completions shape, and `openaiResponsesTools()` in the flat shape of the OpenAI Responses API. Neither needs the Anthropic or OpenAI package.
 
 ## The end-of-task reminder
 
@@ -124,6 +124,23 @@ console.log(result.text); // reminderResult is undefined, or the run after the r
 ```
 
 If you build your own loop with `streamText`, count each step's tool calls with `conversation.countToolCall(call.toolName, call.toolCallId)`.
+
+## Claude Agent SDK
+
+The Claude Agent SDK runs Claude Code underneath, so it can load the Hivemind plugin itself. The agent then gets what Claude Code gets: the SessionStart and Stop hooks, the skills and the MCP server. You do not need this package for that. Clone the repository, set `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` in the environment, and point the `plugins` option at the clone's `plugins/hivemind` folder. Use an absolute path or one relative to `cwd`: the SDK does not expand `~`, and it skips a path that does not exist without an error.
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+
+for await (const message of query({
+  prompt: task,
+  options: { plugins: [{ type: "local", path: "/opt/hivemind/plugins/hivemind" }] },
+})) {
+  console.log(message);
+}
+```
+
+The `init` system message lists `hivemind` under `plugins` and `plugin:hivemind:hivemind` under `mcp_servers`; check it there if the tools are missing. Checked with the Python `claude-agent-sdk` 0.2.189; the TypeScript SDK takes the same option.
 
 ## Other frameworks
 

@@ -155,6 +155,9 @@ describe("text and formats", () => {
     assert.equal(o?.type, "function");
     assert.equal(o?.function.name, hive.tools[0]?.name);
     assert.deepEqual(o?.function.parameters, hive.tools[0]?.inputSchema);
+    const [r] = hive.openaiResponsesTools();
+    assert.deepEqual(Object.keys(r ?? {}).sort(), ["description", "name", "parameters", "type"]);
+    assert.equal(r?.name, hive.tools[0]?.name);
   });
 });
 

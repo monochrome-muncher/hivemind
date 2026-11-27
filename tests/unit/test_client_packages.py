@@ -5,7 +5,9 @@ and the repository npm checks a provenance bundle against."""
 
 from __future__ import annotations
 
+import ast
 import importlib.util
+import inspect
 import json
 import re
 import tomllib
@@ -111,3 +113,69 @@ def test_the_reminder_threshold_matches_the_stop_hook() -> None:
         source = package.read_text()
         assert "HIVEMIND_STOP_MIN_TOOLS" in source
         assert "DEFAULT_MIN_TOOL_CALLS = 20" in source
+
+
+def _server_arguments() -> dict[str, set[str]]:
+    """Each tool's argument names, as the MCP server takes them."""
+    from hivemind.mcp import app
+
+    return {
+        name: set(inspect.signature(function).parameters) - {"app"}
+        for name, function in vars(app).items()
+        if name.startswith("hive_") and inspect.iscoroutinefunction(function)
+    }
+
+
+# A method argument that stands for several tool arguments: an id, or a list of ids.
+_ENTRY = {"entry": {"entry_id", "entry_ids"}, "entry_id": {"entry_id"}}
+
+
+def _python_arguments() -> dict[str, set[str]]:
+    tree = ast.parse((CLIENTS / "python" / "src" / "hivemind_memory" / "client.py").read_text())
+    hive = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Hivemind")
+    methods = {n.name: n for n in hive.body if isinstance(n, ast.AsyncFunctionDef)}
+    found = {}
+    for tool in _server_arguments():
+        method = methods["refresh_whoami" if tool == "hive_whoami" else tool.removeprefix("hive_")]
+        names = {a.arg for a in [*method.args.args, *method.args.kwonlyargs]} - {"self"}
+        found[tool] = set().union(*(_ENTRY.get(name, {name}) for name in names))
+    return found
+
+
+# The TypeScript methods' positional arguments, as wire names, and their options interface.
+_TS_METHODS = {
+    "hive_whoami": (set(), None),
+    "hive_search": ({"query"}, "SearchOptions"),
+    "hive_get": ({"entry_id", "entry_ids"}, "GetOptions"),
+    "hive_list": (set(), "ListOptions"),
+    "hive_pinned": (set(), "PinnedOptions"),
+    "hive_write": ({"kind", "summary"}, "WriteOptions"),
+    "hive_feedback": ({"entry_id", "entry_ids", "verdict"}, "FeedbackOptions"),
+    "hive_withdraw": ({"entry_id", "reason"}, None),
+    "hive_pin": ({"entry_id"}, "PinOptions"),
+    "hive_register": ({"name"}, "RegisterOptions"),
+}
+
+
+def _ts_interface_keys(source: str, name: str) -> set[str]:
+    match = re.search(rf"export interface {name}(?: extends (\w+))? \{{(.*?)\n\}}", source, re.S)
+    assert match, f"no interface {name} in types.ts"
+    parent, body = match.groups()
+    keys = set(re.findall(r"^  (\w+)\?:", body, re.M))
+    return keys | (_ts_interface_keys(source, parent) if parent else set())
+
+
+def _typescript_arguments() -> dict[str, set[str]]:
+    source = (CLIENTS / "typescript" / "src" / "types.ts").read_text()
+    return {
+        tool: positional | (_ts_interface_keys(source, options) if options else set())
+        for tool, (positional, options) in _TS_METHODS.items()
+    }
+
+
+def test_the_python_methods_take_every_tool_argument() -> None:
+    assert _python_arguments() == _server_arguments()
+
+
+def test_the_typescript_methods_take_every_tool_argument() -> None:
+    assert _typescript_arguments() == _server_arguments()

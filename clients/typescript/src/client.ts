@@ -2,7 +2,15 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Conversation, type ConversationOptions } from "./conversation.js";
 import { HivemindError, refusal, rejectedKey } from "./errors.js";
-import { toAnthropic, toOpenAI, type AnthropicTool, type OpenAITool, type ToolDefinition } from "./formats.js";
+import {
+  toAnthropic,
+  toOpenAI,
+  toOpenAIResponses,
+  type AnthropicTool,
+  type OpenAIResponsesTool,
+  type OpenAITool,
+  type ToolDefinition,
+} from "./formats.js";
 import { COMPACTED, INSTRUCTIONS, REMINDER, VERSION } from "./text.js";
 import type {
   BatchFeedbackReply,
@@ -265,7 +273,13 @@ export class Hivemind implements AsyncDisposable {
     return toAnthropic(this.tools);
   }
 
+  /** The tools for OpenAI Chat Completions. */
   openaiTools(): OpenAITool[] {
     return toOpenAI(this.tools);
+  }
+
+  /** The tools for the OpenAI Responses API. */
+  openaiResponsesTools(): OpenAIResponsesTool[] {
+    return toOpenAIResponses(this.tools);
   }
 }

@@ -1,6 +1,6 @@
 # Client packages
 
-`hivemind-memory` lets you build your own agent or system on Hivemind, outside the harnesses the [agent plugin](../plugins/hivemind/README.md) supports. It connects to a Hivemind MCP endpoint and gives your agent loop the tools, the instructions the plugin gives its harnesses, and the end-of-task reminder. Why it is built this way is in [ADR 0162](../docs/adr/0162-python-and-npm-client-packages.md).
+`hivemind-memory` lets you build your own agent or system on Hivemind, outside the harnesses the [agent plugin](../plugins/hivemind/README.md) supports. It connects to a Hivemind MCP endpoint and gives your agent loop the tools, the instructions the plugin gives its harnesses, and the end-of-task reminder. Why it is built this way is in [ADR 0162](../docs/adr/0162-python-and-npm-client-packages.md). Building on the Claude Agent SDK? Load the plugin itself instead; the package READMEs show how.
 
 | Folder | Registry | Docs |
 |---|---|---|

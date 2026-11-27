@@ -18,7 +18,13 @@ from hivemind_memory import text
 from hivemind_memory._version import __version__
 from hivemind_memory.conversation import Conversation
 from hivemind_memory.errors import AUTH_CODES, AuthenticationError, HivemindError
-from hivemind_memory.formats import ToolDefinitions, ToolSpecs, anthropic_tools, openai_tools
+from hivemind_memory.formats import (
+    ToolDefinitions,
+    ToolSpecs,
+    anthropic_tools,
+    openai_responses_tools,
+    openai_tools,
+)
 from hivemind_memory.replies import (
     BatchFeedbackReply,
     CheckReply,
@@ -295,7 +301,12 @@ class Hivemind:
         return anthropic_tools(self.tools)
 
     def openai_tools(self) -> ToolSpecs:
+        """The tools for OpenAI Chat Completions."""
         return openai_tools(self.tools)
+
+    def openai_responses_tools(self) -> ToolSpecs:
+        """The tools for the OpenAI Responses API."""
+        return openai_responses_tools(self.tools)
 
     async def refresh_whoami(self) -> WhoAmI:
         """Ask ``hive_whoami`` again, for example after an admin changed the key's trust."""
