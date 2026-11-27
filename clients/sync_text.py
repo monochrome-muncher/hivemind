@@ -1,5 +1,5 @@
-"""Copy the server instructions, the plugin's `hivemind` skill and its Stop reminder into the
-hivemind-memory packages.
+"""Copy the server instructions, the plugin's `hivemind` skill, its Stop reminder and its
+post-compaction line into the hivemind-memory packages.
 
 Run from the repository root: ``make sync-client-text``.
 
@@ -18,9 +18,9 @@ from hivemind.mcp.contract import INSTRUCTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "plugins" / "hivemind" / "skills" / "hivemind" / "SKILL.md"
-STOP_HOOK = (
-    ROOT / "plugins" / "hivemind" / "skills" / "hivemind-setup" / "scripts" / "hivemind-stop.sh"
-)
+SCRIPTS = ROOT / "plugins" / "hivemind" / "skills" / "hivemind-setup" / "scripts"
+STOP_HOOK = SCRIPTS / "hivemind-stop.sh"
+SESSION_START_HOOK = SCRIPTS / "hivemind-session-start.sh"
 TEXT_DIRS = (
     ROOT / "clients" / "python" / "src" / "hivemind_memory" / "text",
     ROOT / "clients" / "typescript" / "text",
@@ -100,12 +100,20 @@ def reminder() -> str:
     return match.group(1)
 
 
+def compacted() -> str:
+    match = re.search(r'^  extra=" ([^"]*)"$', SESSION_START_HOOK.read_text(), re.MULTILINE)
+    if match is None:
+        raise ValueError("the SessionStart hook's compaction line moved")
+    return match.group(1)
+
+
 def main() -> None:
     skill = client_skill(SKILL.read_text())
     for text_dir in TEXT_DIRS:
         (text_dir / "instructions.txt").write_text(client_instructions(INSTRUCTIONS))
         (text_dir / "skill.md").write_text(skill)
         (text_dir / "reminder.txt").write_text(reminder())
+        (text_dir / "compacted.txt").write_text(compacted())
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """The `hivemind-memory` packages in clients/ stay in step with the server and the plugin
 (ADR 0162): the same version, copies of the server instructions and the skill (less their
-plugin-only lines, ADRs 0163, 0168) and the reminder, and the repository npm checks a provenance
-bundle against."""
+plugin-only lines, ADRs 0163, 0168), the reminder and its rule (ADR 0169), the compaction line,
+and the repository npm checks a provenance bundle against."""
 
 from __future__ import annotations
 
@@ -93,3 +93,21 @@ def test_the_instructions_copy_names_nothing_an_app_lacks() -> None:
 @pytest.mark.parametrize("text_dir", TEXT_DIRS, ids=["python", "typescript"])
 def test_the_reminder_copy_matches_the_stop_hook(text_dir: Path) -> None:
     assert (text_dir / "reminder.txt").read_text() == SYNC.reminder(), SYNC_HINT
+
+
+@pytest.mark.parametrize("text_dir", TEXT_DIRS, ids=["python", "typescript"])
+def test_the_compaction_line_copy_matches_the_session_start_hook(text_dir: Path) -> None:
+    assert (text_dir / "compacted.txt").read_text() == SYNC.compacted(), SYNC_HINT
+    assert SYNC.compacted().startswith("Context was just compacted")
+
+
+def test_the_reminder_threshold_matches_the_stop_hook() -> None:
+    hook = SYNC.STOP_HOOK.read_text()
+    assert 'min="${HIVEMIND_STOP_MIN_TOOLS:-20}"' in hook
+    for package in (
+        CLIENTS / "python" / "src" / "hivemind_memory" / "conversation.py",
+        CLIENTS / "typescript" / "src" / "conversation.ts",
+    ):
+        source = package.read_text()
+        assert "HIVEMIND_STOP_MIN_TOOLS" in source
+        assert "DEFAULT_MIN_TOOL_CALLS = 20" in source

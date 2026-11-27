@@ -34,7 +34,7 @@ const found = await hive.search("when is staging reset?", { limit: 5 });
 
 ## A loop with the Anthropic Messages API
 
-`instructions()` is the system prompt, `anthropicTools()` the tool list, and `runTool()` runs what the model asked for. When the model stops calling tools, the loop sends the end-of-task reminder once and lets the model answer it.
+`instructions()` is the system prompt, `anthropicTools()` the tool list, and the conversation's `runTool()` runs what the model asked for. When the model stops calling tools, the loop asks the conversation whether the end-of-task reminder is due, and if so sends it and lets the model answer it.
 
 ```ts
 import Anthropic from "@anthropic-ai/sdk";
@@ -43,8 +43,8 @@ import { Hivemind } from "hivemind-memory";
 async function run(task: string): Promise<void> {
   const anthropic = new Anthropic();
   await using hive = await Hivemind.connect();
+  const conversation = hive.conversation();
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: task }];
-  let reminded = false;
   while (true) {
     const response = await anthropic.messages.create({
       model: "claude-sonnet-5-5",
@@ -56,14 +56,14 @@ async function run(task: string): Promise<void> {
     messages.push({ role: "assistant", content: response.content });
     const calls = response.content.filter((b) => b.type === "tool_use");
     if (calls.length === 0) {
-      if (reminded) return;
-      messages.push({ role: "user", content: hive.reminder() });
-      reminded = true;
+      const reminder = conversation.reminderDue();
+      if (reminder === undefined) return;
+      messages.push({ role: "user", content: reminder });
       continue;
     }
     const results: Anthropic.ToolResultBlockParam[] = [];
     for (const call of calls) {
-      results.push({ type: "tool_result", tool_use_id: call.id, content: await hive.runTool(call.name, call.input as object) });
+      results.push({ type: "tool_result", tool_use_id: call.id, content: await conversation.runTool(call.name, call.input as object) });
     }
     messages.push({ role: "user", content: results });
   }
@@ -76,7 +76,13 @@ await run("Find out when the staging database is reset.");
 
 ## The end-of-task reminder
 
-When a task ends, send `hive.reminder()` once as a user turn and let the agent answer, as the loop above does. It asks the agent to write what others could reuse and to rate the entries its work tested. The same text is exported as `REMINDER`.
+The reminder asks the agent to write what others could reuse and to rate the entries its work tested. Send it as one more user turn when a task ends and let the agent answer, as the loop above does, but only when `reminderDue()` returns it. It follows the plugin's Stop hook: once per conversation, after at least 20 tool calls (set `HIVEMIND_STOP_MIN_TOOLS`, or `hive.conversation({ minToolCalls })`), and only if the agent rated nothing yet and either wrote nothing or read entries. So a short question costs no extra turn, and an agent that already rated is not asked again.
+
+Start one `hive.conversation()` per conversation. Run the Hivemind tools through its `runTool()`, and call `conversation.countToolCall(name, callId)` for every other tool call your agent makes, so the count is the whole conversation's; a call id counted before is not counted again. `hive.reminder()` and `REMINDER` are the text alone.
+
+## After compaction
+
+If your app compacts or summarizes a conversation's context, add `hive.afterCompaction()` (`COMPACTED`) to the next system prompt or user turn. It asks the agent to write and rate what it learned before the detail is lost, as the plugin does after a compaction.
 
 ## Vercel AI SDK
 
@@ -99,7 +105,25 @@ const { text } = await generateText({
 console.log(text);
 ```
 
-Set `stopWhen`: by default `generateText` stops after one step, so the model would call a tool and never see the result. Errors reach the model as text, as with `runTool`. For the end-of-task reminder, run `generateText` once more with the returned `response.messages` and `hive.reminder()` as the next user message.
+Set `stopWhen`: by default `generateText` stops after one step, so the model would call a tool and never see the result. Errors reach the model as text, as with `runTool`.
+
+For the end-of-task reminder, use `generateTextWithReminder` instead of `generateText`. It counts every tool call of every step once, by its id, and if the reminder is due, runs once more with it as the next user message:
+
+```ts
+import { generateTextWithReminder } from "hivemind-memory/ai-sdk";
+
+const conversation = hive.conversation();
+const { result, reminderResult } = await generateTextWithReminder(conversation, {
+  model: anthropic("claude-sonnet-5-5"),
+  tools: { ...aiSdkTools(hive), ...myTools },
+  system: systemPrompt(hive),
+  prompt: "Find out when the staging database is reset.",
+  stopWhen: stepCountIs(20),
+});
+console.log(result.text); // reminderResult is undefined, or the run after the reminder
+```
+
+If you build your own loop with `streamText`, count each step's tool calls with `conversation.countToolCall(call.toolName, call.toolCallId)`.
 
 ## Other frameworks
 

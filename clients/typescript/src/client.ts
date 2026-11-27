@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Conversation, type ConversationOptions } from "./conversation.js";
 import { HivemindError, refusal, rejectedKey } from "./errors.js";
 import { toAnthropic, toOpenAI, type AnthropicTool, type OpenAITool, type ToolDefinition } from "./formats.js";
-import { INSTRUCTIONS, REMINDER, VERSION } from "./text.js";
+import { COMPACTED, INSTRUCTIONS, REMINDER, VERSION } from "./text.js";
 import type {
   BatchFeedbackReply,
   CheckReply,
@@ -245,8 +246,19 @@ export class Hivemind implements AsyncDisposable {
     return INSTRUCTIONS;
   }
 
+  /** The end-of-task text. `Conversation.reminderDue()` says when to send it. */
   reminder(): string {
     return REMINDER;
+  }
+
+  /** The line to add after the app compacts or summarizes a conversation's context. */
+  afterCompaction(): string {
+    return COMPACTED;
+  }
+
+  /** Starts counting a new conversation's tool calls, for the end-of-task reminder. */
+  conversation(options: ConversationOptions = {}): Conversation {
+    return new Conversation(this, options);
   }
 
   anthropicTools(): AnthropicTool[] {

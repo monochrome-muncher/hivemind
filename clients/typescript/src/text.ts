@@ -8,6 +8,8 @@ function readText(name: string): string {
 
 export const REMINDER: string = readText("reminder.txt");
 
+export const COMPACTED: string = readText("compacted.txt");
+
 export function skillBody(): string {
   return readText("skill.md").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").trim();
 }

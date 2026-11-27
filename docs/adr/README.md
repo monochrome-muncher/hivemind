@@ -178,3 +178,4 @@ is unused.
 | [0166](0166-mcp-schemas-state-the-input-bounds.md) | The MCP tool schemas state the input bounds the server checks; refusals say how to fix the call | Accepted; extends 0105 |
 | [0167](0167-fleet-activity-as-stacked-bars.md) | The portal's fleet activity chart as daily bars stacked by agent, each agent's total in name order, and the fleet-wide verdict mix (never per agent) | Accepted; amends 0165 |
 | [0168](0168-client-instructions-are-an-app-copy.md) | The client packages ship their own copy of the server instructions, without the setup skill, and export it as `INSTRUCTIONS` | Accepted; amends 0162 decision 2, extends 0163 |
+| [0169](0169-client-reminder-follows-the-stop-hook-rule.md) | The client packages say when the end-of-task reminder is due, by the Stop hook's rule, and ship the post-compaction line | Accepted; builds on 0162; `hive.conversation()`, `ainvoke_with_reminder`, `generateTextWithReminder` |
