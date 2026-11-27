@@ -46,7 +46,7 @@ jobs:
 
       - name: Build the Python package
         run: |
-          pip install --no-cache-dir "uv==0.13.9"
+          pip install --no-cache-dir "uv==0.13.10"
           uv build --directory clients/python --out-dir "${RUNNER_TEMP}/pypi"
 
       - name: Build the npm package
