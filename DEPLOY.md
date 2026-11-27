@@ -846,8 +846,8 @@ portal's own routes: `GET /v1/portal/entries`, `POST /v1/portal/search`,
 `POST /v1/portal/entries/{id}/move-to-self`,
 `PUT`/`DELETE /v1/portal/entries/{id}/pin`, `POST /v1/portal/cleanup`,
 `GET /v1/portal/cleanups`, `POST /v1/portal/cleanups/{id}/undo`,
-`GET /v1/portal/history` and
-`POST /v1/portal/key/lock`. Anything else is a 404 from the portal itself,
+`GET /v1/portal/history`, `GET /v1/portal/fleet-activity` (the home
+page's chart) and `POST /v1/portal/key/lock`. Anything else is a 404 from the portal itself,
 including the data plane's writes and its counted search. Headers,
 caching and logging are as for the panel: `X-API-Key`, `Content-Type`
 and `Accept` only, `Cache-Control: no-store`, no header or body logged,

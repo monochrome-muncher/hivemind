@@ -35,6 +35,11 @@ make check      # mypy (strict) + ruff
 make test-unit  # hermetic unit tests, no Postgres needed
 ```
 
+CI also runs the Postgres-backed tests, Hermes's install scan over the
+agent plugin (`make hermes-scan`) and the client packages' own tests
+(see [clients/README.md](clients/README.md)), so a change to the plugin
+or the packages is worth checking with those too.
+
 `make test` runs the full suite, including the Postgres-backed
 integration tests, in parallel (pytest-xdist: one worker per CPU, at most eight, each
 on its own database `<name>_gw0`, `<name>_gw1`, ..., created next to

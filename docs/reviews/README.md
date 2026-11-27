@@ -29,3 +29,4 @@ Security, performance and design reviews of Hivemind, kept as a record of what w
 | 2026-11-26 | [Changes since 2.32.3](2026-11-26-review-2-32-3-to-latest.md): the MCP schema bounds (ADR 0166), the refactors #516 to #525 checked for behaviour changes, and the admin panel and portal refresh with the stacked fleet chart (ADR 0167), timed at 600k entries | 21ae5c4 |
 
 Retrieval measurements live in [retrieval-experiments.md](../retrieval-experiments.md), and research proposals in [proposals/](../proposals/).
+| 2026-11-27 | [Docs for humans and agents](2026-11-27-docs-review.md): the READMEs, DEPLOY.md, AGENTS.md, CONTEXT.md, ROADMAP.md and the skills checked against v2.33.2; small drift fixed, plain voice in SPEC/CONTEXT/ROADMAP and new screenshots left to the owner | a8677a2 |
