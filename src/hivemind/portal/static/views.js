@@ -368,24 +368,32 @@ export async function viewFleet(root) {
       { flush: true }),
       h("p", { class: "muted small", text: mayPin ? `${PIN_REMINDER} Open a memory below to pin it.` : PIN_REMINDER }));
   };
+  const onlyUnverified = h("input", { type: "checkbox", id: "f-unverified" });
+  const unverifiedCount = h("span", { class: "muted" });
+  const fleetMemories = (query) => api("GET", "portal/entries", { query: { fleet_id: me.home_fleet_id, scope: "fleet", ...query } });
+  const countUnverified = async () => {
+    const rows = await optionalRead(() => fleetMemories({ unverified: "true", limit: PORTAL_LIMIT }));
+    unverifiedCount.textContent = rows ? ` (${rows.length}${rows.length >= PORTAL_LIMIT ? "+" : ""})` : "";
+  };
   const memories = entryTable({
-    fetchPage: ({ limit, offset }) => guarded(() => api("GET", "portal/entries", {
-      query: { fleet_id: me.home_fleet_id, scope: "fleet", limit, offset },
-    })),
-    onOpen: (id) => openEntry(id, () => memories.load(true)),
+    fetchPage: ({ limit, offset }) => guarded(() => fleetMemories({ unverified: onlyUnverified.checked ? "true" : "", limit, offset })),
+    onOpen: (id) => openEntry(id, () => { memories.load(true); countUnverified(); }),
     fleetName,
     isNew: (item) => isAfter(item.created_at, since),
-    emptyText: "Nobody has written to this fleet yet.",
+    emptyText: () => (onlyUnverified.checked ? "No fleet memory is still unverified." : "Nobody has written to this fleet yet."),
     csvName: `${fleetName(me.home_fleet_id)}-fleet-memories`,
   });
+  onlyUnverified.addEventListener("change", () => memories.load(true));
+  const unverifiedToggle = h("label", { class: "check", for: "f-unverified", title: "Memories tagged unverified that no other agent has confirmed yet" },
+    onlyUnverified, " Unverified only", unverifiedCount);
 
   fill(root,
     pageHead(fleetName(me.home_fleet_id), "The active memories of its home fleet, newest first, and what the fleet pinned for every member to read.", refreshButton()),
     sinceLine,
     activity.el,
     pinsCard,
-    h("section", { class: "agent-sec" }, h("div", { class: "section-head" }, h("h2", { text: "Fleet memories" })), memories.el));
-  await Promise.all([loadPins().catch((err) => toast(err.message, true)), memories.load(true), activity.load()]);
+    h("section", { class: "agent-sec" }, h("div", { class: "section-head" }, h("h2", { text: "Fleet memories" }), unverifiedToggle), memories.el));
+  await Promise.all([loadPins().catch((err) => toast(err.message, true)), memories.load(true), activity.load(), countUnverified()]);
   await paintSince();
   visit.commit();
 }
