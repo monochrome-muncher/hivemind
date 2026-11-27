@@ -76,7 +76,8 @@ apply.)
   untrusted and skipped, in `codex exec` too): tell the user to do that
   after installing or updating the plugin. The trust covers the plugin's
   files, so an update that changes them lists the hooks as modified and
-  skips them until they are trusted again (checked with Codex 0.166.0).
+  skips them until they are trusted again (checked with Codex 0.166.0 and
+  0.172.0).
   Codex expands `${CLAUDE_PLUGIN_ROOT}` in plugin hooks (checked with
   0.162.1); on a Codex older
   than 0.145 hooks also need `[features]` `codex_hooks = true` in

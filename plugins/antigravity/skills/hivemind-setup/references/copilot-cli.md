@@ -5,7 +5,7 @@ Only for **GitHub Copilot CLI** (GitHub's `copilot` CLI, the npm package
 agent). If you have not confirmed that this is your harness, go back to
 "Which harness am I in?" in the hivemind-setup skill.
 
-Checked with Copilot CLI 1.0.95 and 1.0.112. Its plugin and hook formats are young, so
+Checked with Copilot CLI 1.0.95, 1.0.112 and 1.0.117. Its plugin and hook formats are young, so
 check anything this file does not state with `copilot mcp list` and
 `copilot skill list` rather than assuming.
 
@@ -89,7 +89,10 @@ agents of other harnesses.
   session that rated nothing and either wrote nothing or read entries, to write and rate before finishing (checked
   with Copilot CLI 1.0.95: the reason comes back as the next prompt; in
   `copilot -p` it never fires, because the hook runs before the session's
-  tool calls are recorded).
+  tool calls are recorded). Copilot runs the plugin's hooks only in a
+  trusted folder: in a folder that is not in `trustedFolders` in
+  `~/.copilot/config.json`, neither hook runs and the skills still load
+  (checked with 1.0.114 and 1.0.117).
   Copilot reads the plugin's Claude-style `hooks/hooks.json`; the scripts
   print the form Copilot expects when Copilot runs them. There is no
   post-compaction reminder: Copilot's `SessionStart` has no compaction

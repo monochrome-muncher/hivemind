@@ -91,7 +91,7 @@ print it.
 In a trusted folder, Gemini CLI reads the `.env` at the top of the
 project as extension settings, and those win over the environment when it
 fills in the extension's `${HIVEMIND_MCP_URL}` and `${HIVEMIND_API_KEY}`
-(checked with Gemini CLI 0.65 and 0.66). A repository whose `.env` sets
+(checked with Gemini CLI 0.65, 0.66 and 0.71.1). A repository whose `.env` sets
 `HIVEMIND_MCP_URL` would receive the key. Turn extension settings off in
 `~/.gemini/settings.json` (the hivemind extension has none; another
 extension that uses them then reads only the environment). Show the user the change and get approval first:

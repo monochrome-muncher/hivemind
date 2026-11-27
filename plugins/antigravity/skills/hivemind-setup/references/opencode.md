@@ -10,7 +10,8 @@ The hivemind **OpenCode plugin** does the whole setup itself: it registers
 the Hivemind MCP server from `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY`, adds
 the skills, and puts the reminder into every model request. It supports
 both OpenCode v1 and v2 (the two plugin APIs differ; the plugin carries
-both). Add the Hivemind repository's Git URL to the plugin list in
+both). OpenCode v2 ships as its own npm package, `@opencode/cli` (v1 is
+`opencode-ai`); both install the `opencode` command. Add the Hivemind repository's Git URL to the plugin list in
 `~/.config/opencode/opencode.json` (all projects) or a project's
 `opencode.json`, then export the two variables and restart OpenCode. If a
 `hivemind` server is already defined in your config, it wins; when its URL
@@ -24,8 +25,10 @@ entry automatically. Write `plugin`: it works on both (v1 does not read
 { "plugin": ["git+https://<git-server>/<owner>/hivemind.git#v<version>"] }
 ```
 
-Pin a release tag as shown: OpenCode caches a Git plugin on first use and
-never refreshes an unpinned entry, so changing the tag is how it updates.
+Pin a release tag as shown: OpenCode v1 caches a Git plugin on first use
+and never refreshes an unpinned entry, so changing the tag is how it
+updates. OpenCode v2.4 and later re-check a branch or `semver:` range on
+startup and every 24 hours and install a newer match; a tag stays put.
 
 Or run `opencode plugin -g git+https://<git-server>/<owner>/hivemind.git#v<version>`
 (v1) / `opencode plugin add` with the same URL (v2, which always writes the
@@ -79,8 +82,13 @@ of other harnesses.
 
 - **No hook needed.** The plugin adds the reminder to every model request.
   It also asks you once, when a long session that rated nothing and either wrote nothing or read entries goes
-  idle, to write and rate before finishing (not in `opencode run`), and
+  idle, to write and rate before finishing (not in v1's `opencode run`), and
   after a compaction to write what you learned before it.
+- **OpenCode v2 Code Mode:** the model may see one `execute` tool instead
+  of the `hivemind_hive_*` tools, with a line in the server instructions
+  saying to call this server's tools under `tools["hivemind"]`, such as
+  `tools["hivemind"]["hive_whoami"]({})`. They are the same tools (checked
+  with 2.4.2).
 - **Instruction block:** `~/.config/opencode/AGENTS.md`. OpenCode also
   reads `~/.claude/CLAUDE.md` as a fallback, so a block written for Claude
   Code may load twice; harmless, but do not add a second block to the

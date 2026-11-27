@@ -5,7 +5,8 @@ Only for **Cursor** (the Cursor editor from Anysphere, and its
 not confirmed that this is your harness, go back to "Which harness am I
 in?" in the hivemind-setup skill.
 
-Checked live in November 2026 with the Cursor CLI 2026.11.05, signed in
+Checked live in November 2026 with the Cursor CLI 2026.11.05 (local mode
+again with 2026.11.22), signed in
 with a free account, and in its local-model mode (`cursor-agent-local
 --authless`, no account), against a test Hivemind server. The MCP server,
 both skills, the `sessionStart` hook and incognito worked in both. The
