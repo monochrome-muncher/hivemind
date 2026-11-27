@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { readFileSync } from "node:fs";
-import { AuthenticationError, Hivemind, HivemindError, REMINDER } from "../dist/index.js";
+import { AuthenticationError, Hivemind, HivemindError, INSTRUCTIONS as SHIPPED_INSTRUCTIONS, REMINDER } from "../dist/index.js";
 import { aiSdkTools, systemPrompt } from "../dist/ai-sdk.js";
 import { GOOD_KEY, INSTRUCTIONS, LOCKED_DETAIL, LOCKED_KEY, startFakeHive, type FakeHive } from "./fake-server.js";
 
@@ -129,12 +129,15 @@ describe("calls", () => {
 });
 
 describe("text and formats", () => {
-  it("composes instructions from the server text and the skill body", async () => {
+  it("composes instructions from the shipped server text and the skill body", async () => {
     await using hive = await connect();
+    const server = readFileSync(new URL("../text/instructions.txt", import.meta.url), "utf8").trim();
     const skill = readFileSync(new URL("../text/skill.md", import.meta.url), "utf8");
     const body = skill.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
-    assert.equal(hive.instructions(), `${INSTRUCTIONS}\n\n${body}`);
+    assert.equal(hive.instructions(), `${server}\n\n${body}`);
+    assert.equal(hive.instructions(), SHIPPED_INSTRUCTIONS);
     assert.ok(!hive.instructions().includes("name: hivemind"));
+    assert.ok(!hive.instructions().includes("hivemind-setup"));
   });
 
   it("serves the reminder", async () => {

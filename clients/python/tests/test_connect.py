@@ -7,7 +7,6 @@ from tests.conftest import (
     GOOD_KEY,
     LOCKED_DETAIL,
     LOCKED_KEY,
-    SERVER_INSTRUCTIONS,
     Connected,
     HttpServer,
     build_fake_server,
@@ -89,7 +88,6 @@ async def test_connect_keeps_whoami_tools_and_instructions(connected: Connected)
     async with connected() as hive:
         assert dict(hive.whoami) == {"key_kind": "agent", "name": "fake-agent"}
         assert [tool["name"] for tool in hive.tools] == ["hive_whoami", "hive_search", "hive_get"]
-        assert hive.instructions().startswith(SERVER_INSTRUCTIONS)
 
 
 async def test_an_error_in_the_body_is_not_wrapped_in_an_exception_group(

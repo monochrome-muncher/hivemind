@@ -1,4 +1,4 @@
-"""The texts shipped with the package: the Hivemind skill and the end-of-task reminder."""
+"""The texts shipped with the package: the agent instructions and the end-of-task reminder."""
 
 from __future__ import annotations
 
@@ -21,3 +21,6 @@ def skill_body() -> str:
 
 
 REMINDER = _read("reminder.txt")
+
+
+INSTRUCTIONS = f"{_read('instructions.txt')}\n\n{skill_body()}"

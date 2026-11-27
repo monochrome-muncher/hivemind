@@ -12,6 +12,8 @@ export function skillBody(): string {
   return readText("skill.md").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").trim();
 }
 
+export const INSTRUCTIONS: string = `${readText("instructions.txt").trim()}\n\n${skillBody()}`;
+
 export const VERSION: string = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ).version;

@@ -103,7 +103,7 @@ Set `stopWhen`: by default `generateText` stops after one step, so the model wou
 
 ## Other frameworks
 
-If your framework supports MCP, point it at the `/mcp` URL with the header `Authorization: Bearer <key>`, and add `hive.instructions()` to the system prompt. The instructions are what teach the agent how to use the tools.
+If your framework supports MCP, point it at the `/mcp` URL with the header `Authorization: Bearer <key>`, and add `INSTRUCTIONS` (exported by the package, the same text as `hive.instructions()`, no connection needed) to the system prompt. The instructions are what teach the agent how to use the tools, and many frameworks do not show the server's own instructions to the model.
 
 ## One key is one agent
 
@@ -132,4 +132,4 @@ npm ci
 npm test
 ```
 
-`npm test` builds the package and runs the unit tests against a fake MCP server. `test/live.test.ts` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The skill and reminder under `text/` are generated from the plugin's files by `make sync-client-text`; do not edit them here.
+`npm test` builds the package and runs the unit tests against a fake MCP server. `test/live.test.ts` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The instructions, skill and reminder under `text/` are generated from the plugin's files by `make sync-client-text`; do not edit them here.

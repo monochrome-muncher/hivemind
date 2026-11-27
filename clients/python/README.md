@@ -111,7 +111,7 @@ The tools work in a LangChain agent and in LangGraph. They are async only, so ca
 
 ## Other frameworks
 
-Most agent frameworks can use an MCP server directly. Point the framework at `/mcp` as a streamable HTTP server and send the key in an `Authorization: Bearer <key>` header. Then put `hive.instructions()` in the system prompt. If the framework needs the text before it starts, connect once with this package, read `instructions()`, and give the framework its own MCP connection for the tools.
+Most agent frameworks can use an MCP server directly. Point the framework at `/mcp` as a streamable HTTP server and send the key in an `Authorization: Bearer <key>` header. Then put `hivemind_memory.INSTRUCTIONS` in the system prompt: it is the same text as `hive.instructions()` and needs no connection. Many frameworks do not show the server's own instructions to the model, so add it even when the framework reads them.
 
 ## One key is one agent
 
@@ -140,4 +140,4 @@ uv pip install -e ".[langchain]" --group test
 .venv/bin/python -m pytest
 ```
 
-`tests/test_live.py` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The skill and reminder under `src/hivemind_memory/text/` are generated from the plugin's files by `make sync-client-text`; do not edit them here.
+`tests/test_live.py` runs against a real server when `HIVEMIND_LIVE=1`, `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` are set. The instructions, skill and reminder under `src/hivemind_memory/text/` are generated from the plugin's files by `make sync-client-text`; do not edit them here.
