@@ -65,16 +65,46 @@ hermes_profile_dir() {
   esac
 }
 
-# The pid of a running Hermes gateway for the home $1, else nothing. The
-# gateway outlives the session that started it, and a state file can be
-# left behind by a dead one, so the pid is checked too.
-hermes_gateway_pid() {
-  state="$1/gateway_state.json"
-  [ -r "$state" ] || return 0
-  tr -d '\n' < "$state" | grep -Eq '"gateway_state"[[:space:]]*:[[:space:]]*"running"' || return 0
-  pid=$(tr -d '\n' < "$state" | grep -Eo '"pid"[[:space:]]*:[[:space:]]*[0-9]+' | head -n 1 | grep -Eo '[0-9]+$' || true)
+# The pid a Hermes gateway record names, if that process is alive.
+live_record_pid() {
+  [ -r "$1" ] || return 0
+  record=$(tr -d '\n' < "$1")
+  state=$(printf '%s' "$record" | grep -Eo '"gateway_state"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' || true)
+  case "$state" in stopped|startup_failed) return 0 ;; esac
+  pid=$(printf '%s' "$record" | grep -Eo '"pid"[[:space:]]*:[[:space:]]*[0-9]+' | head -n 1 | grep -Eo '[0-9]+$' || true)
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     echo "$pid"
+  fi
+}
+
+# The folder of the host-wide gateway's record: one gateway per OS user
+# serves every profile, so a profile without a gateway of its own can still
+# be served by it.
+hermes_lock_dir() {
+  if [ -n "${HERMES_GATEWAY_LOCK_DIR:-}" ]; then
+    echo "$HERMES_GATEWAY_LOCK_DIR"
+    return
+  fi
+  case "${XDG_STATE_HOME:-}" in
+    /*) echo "$XDG_STATE_HOME/hermes/gateway-locks" ;;
+    *) echo "${home_dir:-.}/.local/state/hermes/gateway-locks" ;;
+  esac
+}
+
+# "<kind> <pid>" for a live Hermes gateway that could serve a session in the
+# home $1 (kind: profile or host), else nothing. The gateway outlives the
+# session that started it and its record can be left behind by a dead one,
+# so the pid is checked too. A live gateway writes starting, running,
+# degraded or draining; only stopped and startup_failed are written on exit.
+hermes_gateway() {
+  pid=$(live_record_pid "$1/gateway_state.json")
+  if [ -n "$pid" ]; then
+    echo "profile $pid"
+    return
+  fi
+  pid=$(live_record_pid "$(hermes_lock_dir)/host-gateway.json")
+  if [ -n "$pid" ]; then
+    echo "host $pid"
   fi
 }
 
@@ -184,12 +214,18 @@ PY
     # profile's own; both are checked.
     root="${HERMES_HOME:-${home_dir:-.}/.hermes}"
     profile_dir=$(hermes_profile_dir "$root" "$@")
-    # Hermes sessions run inside a per-home gateway daemon with the
-    # environment of the launch that started it, so a live one would keep
-    # Hivemind on. A gateway started here stays up until it is idle.
-    gateway_pid=$(hermes_gateway_pid "$profile_dir")
-    if [ -n "$gateway_pid" ]; then
-      note "a Hermes gateway is running for this profile (pid $gateway_pid); Hermes sessions run inside it with the environment it started with, so this session would not be incognito. Stop it with \`hermes gateway stop\` (or wait until it exits when idle) and run this again. A gateway started by an incognito session is reused by later normal sessions until it exits; \`hermes gateway stop\` brings Hivemind back at once."
+    # Hermes sessions run inside a gateway daemon (one per home, and one
+    # host-wide) with the environment of the launch that started it, so a
+    # live one would keep Hivemind on. A gateway started here stays up until
+    # it is idle.
+    gateway=$(hermes_gateway "$profile_dir")
+    if [ -n "$gateway" ]; then
+      gateway_pid=${gateway#* }
+      case "${gateway%% *}" in
+        host) found="the host-wide Hermes gateway is running" ;;
+        *) found="a Hermes gateway is running for this profile" ;;
+      esac
+      note "$found (pid $gateway_pid); Hermes sessions run inside it with the environment it started with, so this session would not be incognito. Stop it with \`hermes gateway stop\` (or wait until it exits when idle) and run this again. A gateway started by an incognito session is reused by later normal sessions until it exits; \`hermes gateway stop\` brings Hivemind back at once."
       exit 1
     fi
     if ! grep -qs 'HIVEMIND_ENABLED' "$root/config.yaml" "$profile_dir/config.yaml"; then

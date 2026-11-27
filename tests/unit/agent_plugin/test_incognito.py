@@ -213,6 +213,77 @@ def test_launcher_refuses_hermes_for_the_root_gateway(tmp_path: Path) -> None:
     assert _run_launcher(tmp_path, env, "hermes", "-p", "default").returncode == 1
 
 
+@pytest.mark.parametrize("state", ["starting", "running", "degraded", "draining"])
+def test_launcher_refuses_hermes_for_every_live_gateway_state(tmp_path: Path, state: str) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _gateway_state(tmp_path / ".hermes", os.getpid(), state)
+    assert _run_launcher(tmp_path, env, "hermes").returncode == 1
+
+
+@pytest.mark.parametrize("state", ["stopped", "startup_failed"])
+def test_launcher_runs_hermes_for_a_gateway_that_wrote_its_exit_state(
+    tmp_path: Path, state: str
+) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _gateway_state(tmp_path / ".hermes", os.getpid(), state)
+    assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
+
+
+def test_launcher_refuses_hermes_for_a_live_gateway_without_a_state(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "gateway_state.json").write_text(json.dumps({"pid": os.getpid()}))
+    assert _run_launcher(tmp_path, env, "hermes").returncode == 1
+
+
+def _host_gateway(lock_dir: Path, pid: int) -> None:
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    (lock_dir / "host-gateway.json").write_text(
+        json.dumps({"pid": pid, "role": "gateway", "profiles": ["work"], "home": "/x"})
+    )
+
+
+def _lock_dir_env(tmp_path: Path, env: dict[str, str], where: str) -> Path:
+    for name in ("XDG_STATE_HOME", "HERMES_GATEWAY_LOCK_DIR"):
+        env.pop(name, None)
+    if where == "override":
+        env["HERMES_GATEWAY_LOCK_DIR"] = str(tmp_path / "locks")
+        return tmp_path / "locks"
+    if where == "xdg":
+        env["XDG_STATE_HOME"] = str(tmp_path / "state")
+        return tmp_path / "state" / "hermes" / "gateway-locks"
+    return tmp_path / ".local" / "state" / "hermes" / "gateway-locks"
+
+
+@pytest.mark.parametrize("where", ["override", "xdg", "home"])
+def test_launcher_refuses_hermes_for_the_host_gateway_even_for_another_profile(
+    tmp_path: Path, where: str
+) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _host_gateway(_lock_dir_env(tmp_path, env, where), os.getpid())
+    out = _run_launcher(tmp_path, env, "hermes", "-p", "other")
+    assert out.returncode == 1
+    assert f"the host-wide Hermes gateway is running (pid {os.getpid()})" in out.stderr
+    assert "hermes gateway stop" in out.stderr
+
+
+def test_launcher_ignores_a_relative_xdg_state_home(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _lock_dir_env(tmp_path, env, "home")
+    env["XDG_STATE_HOME"] = "state"
+    _host_gateway(tmp_path / "state" / "hermes" / "gateway-locks", os.getpid())
+    _host_gateway(tmp_path / ".local" / "state" / "hermes" / "gateway-locks", _dead_pid())
+    assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
+
+
+@pytest.mark.parametrize("where", ["override", "xdg", "home"])
+def test_launcher_runs_hermes_when_the_host_gateway_is_dead(tmp_path: Path, where: str) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _host_gateway(_lock_dir_env(tmp_path, env, where), _dead_pid())
+    assert "ENABLED=false" in _launch(tmp_path, env, "hermes", "-p", "other")
+
+
 @pytest.mark.parametrize("case", ["no file", "dead pid", "not running", "bad file"])
 def test_launcher_runs_hermes_when_no_live_gateway_is_up(tmp_path: Path, case: str) -> None:
     env = _fake_harness(tmp_path, "hermes")

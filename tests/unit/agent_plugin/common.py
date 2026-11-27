@@ -116,7 +116,11 @@ def _fake_harness(tmp_path: Path, name: str) -> dict[str, str]:
         '"ENABLED=${HIVEMIND_ENABLED:-}" "MODE=${PI_MCP_CONFIG_MODE:-}" "$@"\n'
     )
     script.chmod(0o755)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("HIVEMIND_")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("HIVEMIND_") and k not in ("XDG_STATE_HOME", "HERMES_GATEWAY_LOCK_DIR")
+    }
     env.update(
         PATH=f"{bindir}:{env['PATH']}", HOME=str(tmp_path), CODEX_HOME=str(tmp_path / "codex")
     )

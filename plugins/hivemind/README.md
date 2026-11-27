@@ -748,8 +748,9 @@ How well it works depends on the agent:
   `~/.hermes/config.yaml` (or a profile's own `config.yaml`). Don't set
   `HIVEMIND_ENABLED` in `~/.hermes/.env` or a profile's `.env`, because
   that file overrides the launcher. Hermes runs sessions inside a
-  per-profile gateway daemon that keeps the environment it started with,
-  so the launcher refuses to run while one is up for the profile: run
+  gateway daemon that keeps the environment it started with (one per
+  profile, plus one host-wide gateway that serves every profile), so the
+  launcher refuses to run while either is up: run
   `hermes gateway stop` first. The gateway an incognito launch starts is
   reused by later normal sessions until it exits when idle; run
   `hermes gateway stop` afterwards to get Hivemind back at once.
