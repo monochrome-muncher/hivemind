@@ -166,6 +166,67 @@ def test_launcher_turns_hermes_off_through_its_config_variable(tmp_path: Path) -
     assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
 
 
+def _gateway_state(home: Path, pid: int, state: str = "running") -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "gateway_state.json").write_text(
+        json.dumps({"pid": pid, "kind": "hermes-gateway", "gateway_state": state})
+    )
+
+
+def _dead_pid() -> int:
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
+
+
+def _run_launcher(
+    tmp_path: Path, env: dict[str, str], *args: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", str(LAUNCHER), *args], env=env, cwd=tmp_path, capture_output=True, text=True
+    )
+
+
+def test_launcher_refuses_hermes_while_a_gateway_is_running(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _gateway_state(tmp_path / ".hermes", os.getpid())
+    out = _run_launcher(tmp_path, env, "hermes", "chat")
+    assert out.returncode == 1
+    assert out.stdout == ""
+    assert f"a Hermes gateway is running for this profile (pid {os.getpid()})" in out.stderr
+    assert "hermes gateway stop" in out.stderr
+
+
+def test_launcher_refuses_hermes_for_the_named_profiles_gateway(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _gateway_state(tmp_path / ".hermes" / "profiles" / "work", os.getpid())
+    assert _run_launcher(tmp_path, env, "hermes", "-p", "Work").returncode == 1
+    # the root's gateway is another home: a different profile is not blocked
+    assert _run_launcher(tmp_path, env, "hermes", "-p", "other").returncode == 0
+    assert _run_launcher(tmp_path, env, "hermes").returncode == 0
+
+
+def test_launcher_refuses_hermes_for_the_root_gateway(tmp_path: Path) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    _gateway_state(tmp_path / ".hermes", os.getpid())
+    assert _run_launcher(tmp_path, env, "hermes", "-p", "work").returncode == 0
+    assert _run_launcher(tmp_path, env, "hermes", "-p", "default").returncode == 1
+
+
+@pytest.mark.parametrize("case", ["no file", "dead pid", "not running", "bad file"])
+def test_launcher_runs_hermes_when_no_live_gateway_is_up(tmp_path: Path, case: str) -> None:
+    env = _fake_harness(tmp_path, "hermes")
+    home = tmp_path / ".hermes"
+    if case == "dead pid":
+        _gateway_state(home, _dead_pid())
+    elif case == "not running":
+        _gateway_state(home, os.getpid(), "stopped")
+    elif case == "bad file":
+        home.mkdir()
+        (home / "gateway_state.json").write_text("not json")
+    assert "ENABLED=false" in _launch(tmp_path, env, "hermes")
+
+
 def test_launcher_warns_when_the_hermes_env_file_would_override_it(tmp_path: Path) -> None:
     """Hermes loads ~/.hermes/.env over the environment, so a
     HIVEMIND_ENABLED there beats the launcher's false; the docs must not
