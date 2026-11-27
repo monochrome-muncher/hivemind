@@ -73,33 +73,37 @@ function incognito(): boolean {
 const HIVE_TOOL =
 	/(^|[^a-z])hive_(whoami|search|get|list|pinned|pin|write|feedback|withdraw|register)$/;
 
-// Is this tool call a Hivemind call? Pi exposes MCP tools under their own
-// (prefixed) names; Oh My Pi mounts them as routes that the model calls by
-// writing JSON to a path such as xd://mcp__hivemind_hive_whoami (possibly
-// with a trailing slash or a ?query / #fragment), so there the call arrives
-// as a `write` whose path names the Hivemind tool.
+// The names a tool call goes by. Pi exposes MCP tools under their own
+// (prefixed) names. Oh My Pi 19.2+ lists them as tool commands that the
+// model runs with `bash` (`mcp__hivemind_hive_whoami --help`), so there a
+// Hivemind call is a word of the command. Oh My Pi 18.x and 19.1 mount them
+// as xd:// routes the model writes JSON to (xd://mcp__hivemind_hive_whoami,
+// possibly with a trailing slash or a ?query / #fragment).
+function toolNames(name: string, input: any): string[] {
+	const names = [name];
+	if (name === "bash") {
+		const words = String(input?.command ?? "").split(/[\s;&|()<>"'`]+/);
+		names.push(...words.filter((word) => /^mcp__hivemind/i.test(word)));
+	}
+	const path = String(input?.path ?? "").trim();
+	if (/^xd:\/\//i.test(path)) names.push(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
+	return names;
+}
+
 function isHivemindCall(event: any): boolean {
-	const name = String(event.toolName ?? "");
-	if (HIVE_TOOL.test(name)) return true;
-	if (/^mcp__hivemind(_|$)/i.test(name)) return true;
-	const path = String(event.input?.path ?? "").trim();
-	if (!/^xd:\/\//i.test(path)) return false;
-	const route = path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, "");
-	return HIVE_TOOL.test(route);
+	return toolNames(String(event.toolName ?? ""), event.input).some(
+		(name) => HIVE_TOOL.test(name) || /^mcp__hivemind(_|$)/i.test(name),
+	);
 }
 
 // Does this call name one of these tools (a write, a rating, a read of
 // entries), by any of the routes above?
-type Tool = { exact: RegExp };
-const WROTE: Tool = { exact: /(^|[^a-z])hive_write$/ };
-const RATED: Tool = { exact: /(^|[^a-z])hive_feedback$/ };
-const READ: Tool = { exact: /(^|[^a-z])hive_(search|get)$/ };
+const WROTE = /(^|[^a-z])hive_write$/;
+const RATED = /(^|[^a-z])hive_feedback$/;
+const READ = /(^|[^a-z])hive_(search|get)$/;
 
-function names(tool: Tool, name: string, input: any): boolean {
-	if (tool.exact.test(name)) return true;
-	const path = String(input?.path ?? "").trim();
-	if (!/^xd:\/\//i.test(path)) return false;
-	return tool.exact.test(path.slice("xd://".length).replace(/[?#].*$/, "").replace(/\/+$/, ""));
+function names(tool: RegExp, name: string, input: any): boolean {
+	return toolNames(name, input).some((candidate) => tool.test(candidate));
 }
 
 function stopThreshold(): number {

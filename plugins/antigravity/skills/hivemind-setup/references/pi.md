@@ -76,4 +76,5 @@ also skips registering whenever `HIVEMIND_INCOGNITO` is set), and a
 hand-written `mcp.json` entry that reads `${HIVEMIND_MCP_URL}` has no URL.
 The package's extension also blocks any Hivemind call that still gets
 through: `mcp__hivemind…` tools (including calls made from `codemode`
-scripts) and the Oh My Pi `xd://` routes.
+scripts), the Oh My Pi `xd://` routes and the `bash` commands that run an
+Oh My Pi 19.2 tool command.
