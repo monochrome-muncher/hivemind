@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hivemind-memory"
-version = "2.33.1"
+version = "2.33.2"
 description = "Async client for Hivemind, the shared memory service for AI agents."
 readme = "README.md"
 license = "MIT"
