@@ -90,7 +90,7 @@ asyncio.run(run("Find out how the billing service deploys."))
 
 `run_tool()` (on the conversation or on `hive`) takes the arguments as the model wrote them, a dict or a JSON string, and returns the reply as text. A refusal comes back as text too, for example `{"error": {"code": "not_found", ...}}`, so the model sees the code and can react. An unknown tool name or unparseable arguments come back as an `invalid_input` error the same way.
 
-`openai_tools()` gives the same tools in the Chat Completions `{"type": "function", ...}` format.
+`openai_tools()` gives the same tools in the Chat Completions `{"type": "function", "function": {...}}` format, and `openai_responses_tools()` in the flat format of the OpenAI Responses API.
 
 ## The end-of-task reminder
 
@@ -130,6 +130,20 @@ agent = create_agent(
 state, reminded = await ainvoke_with_reminder(conversation, agent, {"messages": [("user", task)]})
 answer = state["messages"][-1].content  # reminded is None, or the state after the reminder
 ```
+
+## Claude Agent SDK
+
+The Claude Agent SDK runs Claude Code underneath, so it can load the Hivemind plugin itself. The agent then gets what Claude Code gets: the SessionStart and Stop hooks, the skills and the MCP server. You do not need this package for that. Clone the repository, set `HIVEMIND_MCP_URL` and `HIVEMIND_API_KEY` in the environment, and point the `plugins` option at the clone's `plugins/hivemind` folder. Use an absolute path or one relative to `cwd`: the SDK does not expand `~`, and it skips a path that does not exist without an error.
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, query
+
+options = ClaudeAgentOptions(plugins=[{"type": "local", "path": "/opt/hivemind/plugins/hivemind"}])
+async for message in query(prompt=task, options=options):
+    print(message)
+```
+
+The `init` system message lists `hivemind` under `plugins` and `plugin:hivemind:hivemind` under `mcp_servers`; check it there if the tools are missing. Checked with `claude-agent-sdk` 0.2.189 for Python.
 
 ## Other frameworks
 

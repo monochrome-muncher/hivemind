@@ -186,8 +186,18 @@ async def test_openai_tools(connected: Connected) -> None:
         assert search["function"]["parameters"]["required"] == ["query"]
 
 
+async def test_openai_responses_tools(connected: Connected) -> None:
+    async with connected() as hive:
+        tools = hive.openai_responses_tools()
+        search = next(tool for tool in tools if tool["name"] == "hive_search")
+        assert set(search) == {"type", "name", "description", "parameters"}
+        assert search["type"] == "function"
+        assert search["parameters"]["required"] == ["query"]
+
+
 async def test_tool_formats_are_copies(connected: Connected) -> None:
     async with connected() as hive:
         hive.anthropic_tools()[0]["input_schema"].clear()
         hive.openai_tools()[0]["function"]["parameters"].clear()
+        hive.openai_responses_tools()[0]["parameters"].clear()
         assert hive.tools[0]["input_schema"]

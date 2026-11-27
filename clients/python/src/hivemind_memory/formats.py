@@ -1,4 +1,5 @@
-"""Tool definitions as plain data for the Anthropic Messages and OpenAI Chat Completions formats."""
+"""Tool definitions as plain data for the Anthropic Messages, OpenAI Chat Completions and OpenAI
+Responses formats."""
 
 from __future__ import annotations
 
@@ -29,6 +30,18 @@ def openai_tools(tools: ToolDefinitions) -> ToolSpecs:
                 "description": tool["description"],
                 "parameters": copy.deepcopy(tool["input_schema"]),
             },
+        }
+        for tool in tools
+    ]
+
+
+def openai_responses_tools(tools: ToolDefinitions) -> ToolSpecs:
+    return [
+        {
+            "type": "function",
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": copy.deepcopy(tool["input_schema"]),
         }
         for tool in tools
     ]

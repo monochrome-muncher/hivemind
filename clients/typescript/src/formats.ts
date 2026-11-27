@@ -15,6 +15,13 @@ export interface OpenAITool {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
+export interface OpenAIResponsesTool {
+  type: "function";
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
 export function toAnthropic(tools: readonly ToolDefinition[]): AnthropicTool[] {
   return tools.map((t) => ({ name: t.name, description: t.description, input_schema: { ...t.inputSchema, type: "object" } }));
 }
@@ -24,4 +31,8 @@ export function toOpenAI(tools: readonly ToolDefinition[]): OpenAITool[] {
     type: "function",
     function: { name: t.name, description: t.description, parameters: t.inputSchema },
   }));
+}
+
+export function toOpenAIResponses(tools: readonly ToolDefinition[]): OpenAIResponsesTool[] {
+  return tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.inputSchema }));
 }
