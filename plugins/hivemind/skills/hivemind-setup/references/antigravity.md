@@ -6,7 +6,7 @@ Not Gemini CLI, which has its own file. If you have not confirmed that this
 is your harness, go back to "Which harness am I in?" in the hivemind-setup
 skill. Antigravity's system prompt starts "You are Antigravity".
 
-Checked with the Antigravity CLI 1.5.3, 1.5.5 and 1.5.8. Check anything this
+Checked with the Antigravity CLI 1.5.3, 1.5.5, 1.5.8 and 1.5.18. Check anything this
 file does not state with `agy plugin list` and `/plugin` rather than assuming.
 
 ## Connect

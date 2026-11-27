@@ -688,6 +688,11 @@ def test_oh_my_pi_blocks_a_long_session_once() -> None:
         {"toolName": "mcp__hivemind__hive_write", "args": {}},
         {"toolName": "hivemind_hive_feedback", "args": {}},
         {"toolName": "write", "args": {"path": "xd://mcp__hivemind_hive_feedback/"}},
+        {
+            "toolName": "bash",
+            "args": {"command": "mcp__hivemind_hivemind_hive_feedback --entry_id 1"},
+        },
+        {"toolName": "bash", "args": {"command": "cd x && mcp__hivemind_hive_write --help"}},
         {"toolName": "hive_write", "args": {}, "parentToolCallId": "c1"},
     ],
 )
@@ -702,6 +707,10 @@ def test_a_session_that_wrote_or_rated_is_not_reminded(call: dict[str, object]) 
     [
         ({"toolName": "mcp__hivemind__hive_search", "args": {}}, "hive_write"),
         ({"toolName": "hivemind_hive_get", "args": {}}, "hive_write"),
+        (
+            {"toolName": "bash", "args": {"command": "mcp__hivemind_hive_search --query x"}},
+            "hive_write",
+        ),
     ],
 )
 def test_a_pi_session_that_wrote_but_read_and_never_rated_is_reminded(
@@ -712,6 +721,12 @@ def test_a_pi_session_that_wrote_but_read_and_never_rated_is_reminded(
     assert r["settle"][0] is not None
     rate = ["call", {"toolName": "hivemind_hive_feedback", "args": {}}]
     assert _pi([*_calls(25), ["call", read], write, rate, ["settle", {}]]) == {"settle": [None]}
+
+
+@needs_node
+def test_a_bash_command_that_is_not_a_hivemind_tool_is_not_counted() -> None:
+    other = ["call", {"toolName": "bash", "args": {"command": "ls; echo hive_feedback"}}]
+    assert _pi([*_calls(25), other, ["settle", {}]])["settle"][0] is not None
 
 
 @needs_node

@@ -52,8 +52,9 @@ can run in any harness.
      Harness…", "You are Junie, an autonomous programmer developed by JetBrains", "You are Antigravity…", "…operating inside pi…"). Oh My Pi is a fork of Pi and
      its prompt may say the same: if anything else points to Oh My Pi
      (below), it is Oh My Pi, not Pi.
-  2. **Your tools**: MCP tools reached as `xd://mcp__…` routes are Oh My
-     Pi's. Tool names alone are otherwise weak evidence: several
+  2. **Your tools**: MCP tools listed as `mcp__…` tool commands to run with
+     `bash` (19.2 and later) or reached as `xd://mcp__…` routes (older
+     versions) are Oh My Pi's. Tool names alone are otherwise weak evidence: several
      harnesses name MCP tools alike (`mcp__<server>__<tool>`).
   3. **The processes above your shell** (Linux, macOS, WSL; a native
      Windows session has no `ps -o`: skip this and go to the next

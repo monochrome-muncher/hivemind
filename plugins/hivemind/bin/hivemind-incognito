@@ -149,7 +149,7 @@ PY
     # Cursor has no documented per-session MCP switch. Its mcp.json reads
     # ${env:HIVEMIND_MCP_URL} and ${env:HIVEMIND_API_KEY}; with both unset
     # they resolve empty and the server cannot authenticate (built from
-    # Cursor's documentation, not yet checked live). The hooks see
+    # Cursor's documentation; checked live with 2026.11.22). The hooks see
     # HIVEMIND_INCOGNITO and say the incognito line, but the plugin's
     # always-on rule still loads, and a server configured another way keeps
     # working, so that setup is incognito by restraint.

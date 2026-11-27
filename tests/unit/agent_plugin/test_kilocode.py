@@ -165,6 +165,10 @@ _CALLS = [
     # The ADR 0058 tools, under Pi's built-in MCP names.
     {"toolName": "mcp__hivemind__hive_pinned", "input": {}},
     {"toolName": "mcp__other__hive_pin", "input": {}},
+    # Oh My Pi 19.2+: tool commands run through bash.
+    {"toolName": "bash", "input": {"command": "mcp__hivemind_hivemind_hive_search --query x"}},
+    {"toolName": "bash", "input": {"command": "cd /tmp && mcp__hivemind_hive_write --help"}},
+    {"toolName": "bash", "input": {"command": "echo hive_search; cat mcp__other_hive_pin"}},
 ]
 
 
@@ -192,6 +196,9 @@ def test_the_extension_blocks_hivemind_calls_only_in_incognito() -> None:
         True,
         True,
         True,
+        True,
+        True,
+        False,
     ]
     assert incognito["omp"]["systemPrompt"][-1] == INCOGNITO_TEXT
 

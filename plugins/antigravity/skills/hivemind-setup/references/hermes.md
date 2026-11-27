@@ -55,8 +55,9 @@ in the hivemind-setup skill.
   key, restart Hermes.
 - Hermes needs its `mcp` Python package for any MCP server. If
   `hermes mcp test hivemind` says the `mcp` Python SDK is not installed,
-  the user runs `hermes setup` to add MCP support (checked with v0.23.3,
-  whose plugin install creates a fresh environment without it).
+  the user runs `hermes setup` to add MCP support (checked with v0.23.3
+  and v0.23.4, whose plugin install creates a fresh environment without
+  it).
 
 **Identity:** name this agent `<user>-hermes`, distinct from the agents of
 other harnesses.

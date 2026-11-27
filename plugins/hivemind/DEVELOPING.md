@@ -110,10 +110,12 @@ writes is one its update file passes to the drift check.
   Checked live with Pi 1.0.0.
 - **Oh My Pi** loads the plugin's `.mcp.json` as the server
   `hivemind:hivemind`, expanding `${VAR}` in the URL and the header, and
-  mounts MCP tools as routes (`xd://mcp__hivemind_hivemind_hive_*`, or
-  `xd://mcp__hivemind_hive_*` for a hand entry, which then replaces the
-  plugin's) rather than as named tools; the agent finds them in its system
-  prompt. Checked with Oh My Pi 18.9.1, and headless with 18.20.2.
+  offers MCP tools as tool commands the model runs with `bash`
+  (`mcp__hivemind_hivemind_hive_*`, or `mcp__hivemind_hive_*` for a hand
+  entry, which then replaces the plugin's) from 19.2, listed under "MCP Tool
+  Commands" in its system prompt, and as routes (`xd://mcp__hivemind_hivemind_hive_*`)
+  before; they are not named tools. Checked with Oh My Pi 18.9.1 and 19.2.1,
+  and headless with 18.20.2.
   A plain `omp install` of the repository installs the root package: the
   extension and, through the root `skills` link, the skills, but no MCP
   server (the package route has no `.mcp.json`, and Oh My Pi has no
@@ -573,7 +575,8 @@ The script counts seven transcript formats:
   the model made in `tool_execution_start` (a call a script made for it,
   with a `parentToolCallId`, is not counted) and noting a `hive_write`,
   `hive_feedback`, `hive_search` or `hive_get` by any route (named tool, a
-  codemode script's call, an Oh My Pi `xd://` route). Once per session (reset on
+  codemode script's call, an Oh My Pi `xd://` route, a word of an Oh My Pi
+  19.2 `bash` command such as `mcp__hivemind_hivemind_hive_write --help`). Once per session (reset on
   `session_start`), Pi's `agent_before_settle` appends the reminder as a
   visible `custom_message` and asks for one more model request; Oh My
   Pi's `session_stop` returns the Claude Code-style block. After
@@ -581,7 +584,8 @@ The script counts seven transcript formats:
   post-compaction sentence once. Checked live with Pi 1.1.0 and Oh My Pi
   18.9.1 against a mock model: three shell calls get the reminder as the
   next prompt, and a `hive_write` (Pi `mcp__hivemind__hive_write`, Oh My
-  Pi `xd://mcp__hivemind_hivemind_hive_write`) keeps it quiet. The
+  Pi `xd://mcp__hivemind_hivemind_hive_write` or, from 19.2, a `bash` call of
+  `mcp__hivemind_hivemind_hive_write`) keeps it quiet. The
   compaction sentence is tested only in `tests/unit/test_stop_hook.py`.
 - **OpenCode.** OpenCode has no hook that can hold a stop, so the plugin
   (`opencode/hivemind.js`) counts each session's calls in
@@ -634,7 +638,7 @@ does two things:
 | Codex | `-c mcp_servers.hivemind.enabled=false`; the launcher also unsets the key | the `mcp_servers.hivemind` entry in `~/.codex/config.toml` or `.codex/config.toml` |
 | DeepSeek Harness | the bundle's server row switches itself off | nothing |
 | Hermes | `HIVEMIND_ENABLED=false`; the launcher checks the root and the session's profile (`-p`/`--profile`, else the saved `active_profile`) | `enabled: ${HIVEMIND_ENABLED}` in the hivemind server entry in `~/.hermes/config.yaml` or the profile's `config.yaml`, and **no** `HIVEMIND_ENABLED` in `~/.hermes/.env` or the profile's `.env` (Hermes loads it over the environment, so it would override the launcher); for normal sessions leave it unset or export `HIVEMIND_ENABLED=true` in the shell profile. Hermes (v0.23+) runs sessions in a per-home gateway daemon that keeps the environment of the launch that started it, so the launcher refuses (exit 1) while the profile's `gateway_state.json` names a live pid in state `running`; after an incognito session `hermes gateway stop` lets normal sessions load Hivemind again |
-| Pi | the package registers no server, and the key and URL are unset; a hand-written `mcp.json` entry that reads `${HIVEMIND_MCP_URL}` has no URL. The extension also blocks `mcp__hivemind…` calls (codemode scripts included) and the Oh My Pi `xd://` routes | the hivemind package |
+| Pi | the package registers no server, and the key and URL are unset; a hand-written `mcp.json` entry that reads `${HIVEMIND_MCP_URL}` has no URL. The extension also blocks `mcp__hivemind…` calls (codemode scripts included), the Oh My Pi `xd://` routes and the `bash` commands that run an Oh My Pi 19.2 tool command | the hivemind package |
 | Oh My Pi | `HIVEMIND_API_KEY` unset and `HIVEMIND_MCP_URL=off` (not unset: Oh My Pi runs on Bun, which fills an unset or empty variable from the project's `.env`), so the server is never contacted (Oh My Pi warns once that it is unavailable); the extension also blocks any Hivemind call | the hivemind plugin |
 | GitHub Copilot CLI | `--disable-mcp-server hivemind` for the session (it never contacts the server); the launcher also unsets the key and URL | the server named `hivemind` in `~/.copilot/mcp-config.json` |
 | Cursor | no per-session MCP switch: `HIVEMIND_MCP_URL`/`HIVEMIND_API_KEY` unset, so the `${env:…}` references in `~/.cursor/mcp.json` resolve empty and the server cannot authenticate; the hook prints the incognito line in Cursor's JSON shape, and the always-on rule still loads (the launcher prints a note) | the server entry with `${env:…}` references |

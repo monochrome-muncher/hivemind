@@ -18,14 +18,17 @@ It provides the MCP server, the skills and the system-prompt
 reminder. The server comes from the plugin's `.mcp.json` and is named
 `hivemind:hivemind`; Oh My Pi expands its `${HIVEMIND_MCP_URL}` and
 `${HIVEMIND_API_KEY}` at startup, so the key never lands in a file. Its
-tools are routes (`xd://mcp__hivemind_hivemind_hive_*`), listed in your
-system prompt. (Checked with Oh My Pi 18.9.1. A plain `omp install
+tools are listed in your system prompt: from Oh My Pi 19.2 as tool
+commands under "MCP Tool Commands" that the model runs with the `bash`
+tool (`mcp__hivemind_hivemind_hive_whoami --help`), in older versions as
+routes (`xd://mcp__hivemind_hivemind_hive_*`). (Checked with Oh My Pi
+18.9.1 and 19.2.1. A plain `omp install
 <git-url>` is not enough: it brings the skills and the reminder but not
 the MCP server; checked with 18.15.0.)
 
 **No `hivemind` entry in `~/.omp/agent/mcp.json` is needed.** One from an
 older setup still works: Oh My Pi then connects that one instead of the
-plugin's (routes `xd://mcp__hivemind_hive_*`), never both. Without the
+plugin's (`mcp__hivemind_hive_*`, or the `xd://` routes in older versions), never both. Without the
 plugin, that hand entry is the way to connect:
 
 ```json
@@ -74,6 +77,7 @@ in `enabledProviders`; check that setting.
 `hivemind-incognito omp` unsets `HIVEMIND_API_KEY` and sets
 `HIVEMIND_MCP_URL=off` (Oh My Pi would fill an unset one from the
 project's `.env`), so the server is never contacted (Oh My Pi warns once
-that it is unavailable); the extension also blocks any Hivemind call, including the
-`xd://` routes with a trailing slash or a `?query`. It needs the hivemind
+that it is unavailable); the extension also blocks any Hivemind call, including a
+`bash` command that runs a Hivemind tool command (19.2 and later) and the
+`xd://` routes of older versions, with a trailing slash or a `?query`. It needs the hivemind
 plugin.
