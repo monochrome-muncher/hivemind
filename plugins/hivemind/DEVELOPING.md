@@ -102,8 +102,14 @@ writes is one its update file passes to the drift check.
   `~/.hermes/.env` over the process environment, which matters for
   incognito. Since v0.23 sessions run inside a per-home gateway daemon
   (`hermes gateway run --idle-exit`, 600 s idle by default) that keeps its
-  launch environment, so the launcher checks `gateway_state.json` and the
-  pid before it starts one.
+  launch environment, so the launcher refuses while one is live. It reads
+  the profile's `gateway_state.json` (live when the pid is alive and the
+  state is anything but `stopped` or `startup_failed`; `starting`,
+  `degraded` and `draining` count) and the host-wide gateway's
+  `host-gateway.json` in the lock dir (`$HERMES_GATEWAY_LOCK_DIR`, else
+  `$XDG_STATE_HOME/hermes/gateway-locks` when absolute, else
+  `~/.local/state/hermes/gateway-locks`). One host gateway serves every
+  profile, so its pid alone is enough; the profile list is not parsed.
 - **Pi** uses the built-in MCP client (Pi 0.99+): the extension registers
   the server with it, with direct exposure, unless a hand-written
   `hivemind` entry in `~/.pi/agent/mcp.json` takes precedence (Pi's rule).
