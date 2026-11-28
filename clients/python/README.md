@@ -142,7 +142,7 @@ async with Hivemind.connect() as hive:
 
 The tools work in a LangChain agent and in LangGraph. They are async only, so call them with `ainvoke` or run them in an async agent; `invoke` raises `NotImplementedError`. Like `run_tool()`, they return refusals as text.
 
-For the end-of-task reminder, run the agent through `ainvoke_with_reminder`. It runs the agent, counts every tool call in its messages once by its id (so a checkpointer that returns the whole thread is fine), and if the reminder is due, runs it once more with the reminder as the next message. It works with any agent whose state holds `messages`, such as LangChain's `create_agent` and LangGraph graphs.
+For the end-of-task reminder, run the agent through `ainvoke_with_reminder`. It runs the agent, counts every tool call in its messages once by its id (so a checkpointer that returns the whole thread is fine), and if the reminder is due, runs it once more with the reminder as the next message. It works with any agent whose state holds `messages`, such as LangChain's `create_agent` and LangGraph graphs. A run that paused for a human approval, or ended on tool calls without results, gets no reminder, so the reminder stays due for the next call.
 
 ```python
 from langchain.agents import create_agent

@@ -10,6 +10,7 @@ import importlib.util
 import inspect
 import json
 import re
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,28 @@ def test_the_reminder_copy_matches_the_stop_hook(text_dir: Path) -> None:
 def test_the_compaction_line_copy_matches_the_session_start_hook(text_dir: Path) -> None:
     assert (text_dir / "compacted.txt").read_text() == SYNC.compacted(), SYNC_HINT
     assert SYNC.compacted().startswith("Context was just compacted")
+
+
+def test_both_packages_compose_the_same_instructions(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = CLIENTS / "python" / "src" / "hivemind_memory"
+    package_spec = importlib.util.spec_from_file_location(
+        "hivemind_memory", source / "__init__.py", submodule_search_locations=[str(source)]
+    )
+    assert package_spec
+    monkeypatch.setitem(
+        sys.modules, "hivemind_memory", importlib.util.module_from_spec(package_spec)
+    )
+    spec = importlib.util.spec_from_file_location("hivemind_memory.text", source / "text.py")
+    assert spec and spec.loader
+    python_text = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(python_text)
+
+    ts_text = CLIENTS / "typescript" / "text"
+    skill = re.sub(r"^---\r?\n[\s\S]*?\r?\n---\r?\n", "", (ts_text / "skill.md").read_text())
+    typescript_instructions = (
+        f"{(ts_text / 'instructions.txt').read_text().strip()}\n\n{skill.strip()}"
+    )
+    assert typescript_instructions == python_text.INSTRUCTIONS
 
 
 def test_the_reminder_threshold_matches_the_stop_hook() -> None:

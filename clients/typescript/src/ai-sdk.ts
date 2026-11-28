@@ -33,6 +33,7 @@ export interface RemindedResult<TOOLS extends ToolSet> {
 /**
  * `generateText`, then, if the end-of-task reminder is due, one more `generateText` with the
  * reminder as the next user message. Every tool call of every step is counted once, by its id.
+ * A run that stopped for a tool approval or a result is not reminded: the reminder would abandon it.
  */
 export async function generateTextWithReminder<TOOLS extends ToolSet>(
   conversation: Conversation,
@@ -40,19 +41,30 @@ export async function generateTextWithReminder<TOOLS extends ToolSet>(
 ): Promise<RemindedResult<TOOLS>> {
   const result = await generateText(options);
   countToolCalls(conversation, result);
+  if (awaitsToolResults(result)) {
+    return { result, reminderResult: undefined };
+  }
   const reminder = conversation.reminderDue();
   if (reminder === undefined) {
     return { result, reminderResult: undefined };
   }
   const messages: ModelMessage[] = [
     ...history(options),
-    ...result.response.messages,
+    ...result.responseMessages,
     { role: "user", content: reminder },
   ];
   const { prompt: _prompt, ...rest } = options as GenerateTextOptions<TOOLS> & { prompt?: unknown };
   const reminderResult = await generateText({ ...rest, messages } as GenerateTextOptions<TOOLS>);
   countToolCalls(conversation, reminderResult);
   return { result, reminderResult };
+}
+
+// A tool call without a result in the last step: an approval or an app-run tool is pending.
+function awaitsToolResults(result: { steps: readonly StepCalls[] }): boolean {
+  const last = result.steps.at(-1);
+  if (!last) return false;
+  const answered = new Set(last.toolResults.map((r) => r.toolCallId));
+  return last.toolCalls.some((call) => !answered.has(call.toolCallId));
 }
 
 function history(options: object): ModelMessage[] {
@@ -62,7 +74,12 @@ function history(options: object): ModelMessage[] {
   return prompt ?? [];
 }
 
-function countToolCalls(conversation: Conversation, result: { steps: readonly { toolCalls: readonly { toolName: string; toolCallId: string }[] }[] }): void {
+interface StepCalls {
+  toolCalls: readonly { toolName: string; toolCallId: string }[];
+  toolResults: readonly { toolCallId: string }[];
+}
+
+function countToolCalls(conversation: Conversation, result: { steps: readonly StepCalls[] }): void {
   for (const step of result.steps) {
     for (const call of step.toolCalls) {
       conversation.countToolCall(call.toolName, call.toolCallId);

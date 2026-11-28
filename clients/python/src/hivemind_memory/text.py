@@ -16,13 +16,13 @@ def skill_body() -> str:
     """The skill without its YAML front matter."""
     skill = _read("skill.md")
     if not skill.startswith("---\n"):
-        return skill
+        return skill.strip()
     _, _, body = skill.partition(_FRONT_MATTER_END)
-    return body.lstrip("\n")
+    return body.strip()
 
 
 REMINDER = _read("reminder.txt")
 COMPACTED = _read("compacted.txt")
 
 
-INSTRUCTIONS = f"{_read('instructions.txt')}\n\n{skill_body()}"
+INSTRUCTIONS = f"{_read('instructions.txt').strip()}\n\n{skill_body()}"

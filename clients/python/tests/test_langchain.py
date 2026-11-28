@@ -89,3 +89,29 @@ async def test_ainvoke_with_reminder_counts_a_returned_thread_once(connected: Co
         first, _ = await ainvoke_with_reminder(conversation, agent, {"messages": []})
         await ainvoke_with_reminder(conversation, agent, first)
         assert conversation.tool_calls == 2
+
+
+async def test_ainvoke_with_reminder_skips_a_run_paused_for_approval(connected: Connected) -> None:
+    async with connected() as hive:
+        conversation = hive.conversation(min_tool_calls=1)
+
+        class Pausing:
+            async def ainvoke(self, input: dict[str, Any], /, **kwargs: Any) -> dict[str, Any]:
+                return {"messages": [_calling("hive_search")], "__interrupt__": ["approve?"]}
+
+        _state, reminded = await ainvoke_with_reminder(conversation, Pausing(), {"messages": []})
+        assert reminded is None
+        assert conversation.tool_calls == 1
+        assert conversation.reminder_due() == hive.reminder()
+
+
+async def test_ainvoke_with_reminder_skips_a_run_ending_on_unanswered_tool_calls(
+    connected: Connected,
+) -> None:
+    async with connected() as hive:
+        conversation = hive.conversation(min_tool_calls=1)
+        agent = _ScriptedAgent([_calling("hive_search")])
+        _state, reminded = await ainvoke_with_reminder(conversation, agent, {"messages": []})
+        assert reminded is None
+        assert len(agent.inputs) == 1
+        assert conversation.reminder_due() == hive.reminder()

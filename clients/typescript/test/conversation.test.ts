@@ -136,6 +136,42 @@ describe("generateTextWithReminder", () => {
     assert.match(JSON.stringify(prompts.at(-1)), /the task/);
   });
 
+  it("carries every step of the task into the reminder run, in order", async () => {
+    await using hive = await connect();
+    const conversation = hive.conversation({ minToolCalls: 1 });
+    const { model, prompts } = scriptedModel([
+      { call: "app_tool", input: {} },
+      { text: "the answer" },
+      { text: "nothing new" },
+    ]);
+    await generateTextWithReminder(conversation, {
+      model,
+      prompt: "the task",
+      tools: { app_tool: appTool },
+      stopWhen: stepCountIs(5),
+    });
+    const sent = (prompts.at(-1) as { role: string; content: unknown }[]).map((m) => JSON.stringify(m));
+    const at = (pattern: RegExp) => sent.findIndex((m) => pattern.test(m));
+    const order = [/"role":"user".*the task/, /"role":"assistant".*tool-call/, /"role":"tool".*tool-result/, /"role":"assistant".*the answer/, /HIVEMIND: before finishing/].map(at);
+    assert.ok(order.every((i) => i >= 0), `missing a message in ${sent.join("\n")}`);
+    assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  });
+
+  it("does not remind a run that ended waiting for a tool approval", async () => {
+    await using hive = await connect();
+    const conversation = hive.conversation({ minToolCalls: 1 });
+    const { model } = scriptedModel([{ call: "app_tool", input: {} }]);
+    const { reminderResult } = await generateTextWithReminder(conversation, {
+      model,
+      prompt: "the task",
+      tools: { app_tool: tool({ description: "needs approval", inputSchema: jsonSchema({ type: "object" }), needsApproval: true, execute: async () => "ok" }) },
+      stopWhen: stepCountIs(5),
+    });
+    assert.equal(reminderResult, undefined);
+    assert.equal(conversation.toolCalls, 1);
+    assert.equal(conversation.reminderDue(), REMINDER);
+  });
+
   it("stops after the task when the reminder is not due", async () => {
     await using hive = await connect();
     const conversation = hive.conversation({ minToolCalls: 5 });
