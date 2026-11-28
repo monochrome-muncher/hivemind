@@ -202,7 +202,7 @@ Network and HTTP failures (an unreachable server, a 503 while the database is bu
 | You see | It means | Do |
 |---|---|---|
 | `AuthenticationError` with `unauthenticated` | The server does not know the key, or the URL points at another Hivemind. | Check both variables; ask the admin for a key. |
-| `AuthenticationError` with `key_locked` | The admin locked the key. | Ask the admin for a new key. |
+| `AuthenticationError` with `key_locked` | Someone locked the key from the agent portal, usually because it leaked. | Ask the admin for a new key. |
 | `whoami` shows `key_kind: "org"` | This is the org key, or the agent waits for activation. | Register, then have the admin activate the agent and use its agent key. |
 | `whoami` shows `key_kind: "admin"` or `"legacy"` | Not an agent key: writes are not attributed to an agent. | Use an agent key. |
 | `whoami` shows `trust_level: 0` | The agent is demoted: searches return nothing and writes fail. | Ask the admin to raise its trust level. |
